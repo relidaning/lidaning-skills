@@ -1,5 +1,53 @@
 # Sessions
 
+## 2026-05-16 — Add interactive hints to learning-instruct
+
+### Goal
+Add level assessment after goal confirmation and three interactive commands
+(next, quiz, scenario) to deepen learning during Phase 3.
+
+### What we did
+- Added level assessment after Phase 1 — skill judges beginner/intermediate/advanced
+  from user's background, user confirms or corrects
+- Added `/learning-instruct next` — pushes the current concept one layer deeper
+- Added `/learning-instruct quiz` — pops a focused question, explains after answer
+- Added `/learning-instruct scenario` — pops a realistic open-ended problem,
+  evaluates the user's solution
+- Updated SKILL.md description to mention interactive commands
+- Updated SESSION.md
+
+### Current state
+Skill now has interactive depth during teaching. Commands only work when a
+learning track is active.
+
+### Decisions
+- Level assessment right after goal — drives depth and pace of teaching
+- Quiz vs scenario: quiz is conceptual/quick, scenario is applied/open-ended
+- Commands only active during Phase 3 (a part must be in progress)
+
+## 2026-05-16 — Refine learning-instruct goal detection
+
+### Goal
+Make Phase 1 smarter — read project context to infer what the user is trying
+to learn, rather than asking "what do you want to learn?" from a blank slate.
+
+### What we did
+- Updated SKILL.md Phase 1 to scan CLAUDE.md, SESSION.md, TODO.md, MEMORIES.md,
+  and git history before asking
+- Formulated guess-and-confirm pattern: present best guess, let user confirm
+  or correct
+- Updated goal.md rules to include "read the project first"
+- Updated SKILL.md frontmatter description
+
+### Current state
+Goal detection now project-aware. On next /learning-instruct invocation,
+skill will infer from project context.
+
+### Decisions
+- Guess-and-confirm over blank question — faster for user, shows understanding
+- Falls back to direct question if project context is too sparse
+- Reads multiple project files (not just one) for a richer guess
+
 ## 2026-05-16 — Create learning-instruct skill
 
 ### Goal

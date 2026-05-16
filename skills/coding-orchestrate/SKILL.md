@@ -20,6 +20,12 @@ This skill keeps four files at the project root in sync with reality:
 - **[README.md](readme.md)** — key concepts, core features, and mechanisms
   of the project. Keep it current.
 
+## General rules
+
+- **Always check the current date before web search.** Web search results
+  need the current year to be relevant. Query the date first, then include
+  the year in search terms.
+
 ## Rules summary
 
 | File | When | Why |

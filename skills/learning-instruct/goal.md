@@ -18,6 +18,9 @@ narrowing. Never used generics beyond `Array<T>`.
 
 ## Rules
 
+- **Read the project first** — before asking the user what they want to learn,
+  scan CLAUDE.md, SESSION.md, TODO.md, MEMORIES.md, and recent git history.
+  Form a best guess so the user can confirm rather than type from scratch.
 - **One goal at a time** — completing or abandoning the current goal replaces
   this file
 - **Be specific** — "Learn Rust" is too vague. "Be able to contribute to a
