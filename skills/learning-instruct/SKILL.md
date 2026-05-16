@@ -13,13 +13,17 @@ description: >
 ## Overview
 
 This skill tutors the user through a structured learning process. It manages
-five files under `.learning-instruct/` at the project root:
+files under `.learning-instruct/` at the project root:
 
 - **[GOAL.md](goal.md)** — what the user wants to learn
 - **[compositions.md](compositions.md)** — the subject broken into parts
 - **[steps.md](steps.md)** — step-by-step teaching plan and progress
 - **[SUBJECT.md](subject.md)** — living reference of key concepts, quiz Q&A,
   scenarios, and gotchas; the user's study guide
+- **[ISSUES.md](issues.md)** — problems encountered, root causes, how they
+  were resolved, and lessons learned
+- **[DOCUMENTATIONS.md](documentations.md)** — index of user-provided
+  resources summarized into `docs/`; source content only, no added knowledge
 - Evaluation — interview questions to assess mastery and find gaps
 
 ## Workflow
@@ -103,6 +107,27 @@ These commands only work when a learning track is active (GOAL.md exists and
 a part is in progress). If invoked without context, guide the user back to
 the current part.
 
+#### Resource ingestion
+
+When the user provides a URL or document during a learning track:
+
+1. Create `.learning-instruct/docs/` if it doesn't exist (`mkdir -p`)
+2. Fetch and read the resource (use WebFetch for URLs, Read for local files)
+3. **Write the summary file to disk** — `.learning-instruct/docs/<name>.md`.
+   This is the deliverable. Do NOT just describe the content in chat — the
+   user must be able to `ls` the file and read it later.
+4. Add an index entry to `DOCUMENTATIONS.md` and write that file too
+
+**Critical rule: source content only.** Summarize what the resource actually
+says. Do NOT mix in explanations, context, or corrections from your own
+knowledge. The summary must be a faithful mirror of the source.
+
+**The files on disk are the proof of work.** If there's no file under
+`.learning-instruct/docs/`, the ingestion didn't happen. Chat text doesn't
+count. Always verify with `ls` after writing.
+
+See [documentations.md](documentations.md) for format and full rules.
+
 ### Phase 4: Evaluate
 
 After all parts are taught, run a comprehensive evaluation:
@@ -122,8 +147,11 @@ After all parts are taught, run a comprehensive evaluation:
   exercise completed, level adjusted), update the relevant file immediately.
   Don't batch updates — write as you go.
 - **Goal first** — don't skip to teaching without a clear, specific goal
-- **Research properly** — use web search to find authoritative sources and
-  current best practices for the subject
+- **Truth over confidence** — every explanation, concept, quiz answer, and
+  scenario solution must be factually correct. Verify claims with web search
+  before teaching. If you're unsure about something, say so and look it up —
+  never guess or fabricate. One wrong "fact" taught to the user erodes trust
+  in the entire track. Cite sources when they're non-obvious
 - **User owns the breakdown** — present compositions for approval; let them
   reshape it
 - **Mastery over coverage** — don't move to the next part until the user
@@ -135,6 +163,13 @@ After all parts are taught, run a comprehensive evaluation:
 - **Write to SUBJECT.md immediately** — after every quiz, scenario, or key
   concept explanation, add it to SUBJECT.md right away. This file is the
   user's study guide — it should always be current and review-ready
+- **Log issues as they happen** — when the user hits a misunderstanding,
+  gets a quiz wrong, or struggles with a concept, write it to ISSUES.md.
+  Capture what happened, the root cause, how it was resolved, and the lesson
+- **Document ingestion writes real files** — when the user provides a URL or
+  document, the deliverable is a file on disk under `.learning-instruct/docs/`,
+  not chat text. Create the directory if missing. Verify with `ls` after
+  writing. The DOCUMENTATIONS.md index must be kept current
 
 ## Additional resources
 
@@ -142,3 +177,5 @@ After all parts are taught, run a comprehensive evaluation:
 - For compositions format and rules, see [compositions.md](compositions.md)
 - For steps and evaluation format, see [steps.md](steps.md)
 - For subject reference format, see [subject.md](subject.md)
+- For issue log format, see [issues.md](issues.md)
+- For documentation ingestion format, see [documentations.md](documentations.md)

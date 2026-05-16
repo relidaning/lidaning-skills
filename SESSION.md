@@ -1,5 +1,45 @@
 # Sessions
 
+## 2026-05-16 — Add DOCUMENTATIONS.md to learning-instruct
+
+### Goal
+Let users provide URLs/documents that get summarized into `.learning-instruct/docs/`,
+indexed by DOCUMENTATIONS.md. Strict rule: source content only, no added knowledge.
+
+### What we did
+- Created skills/learning-instruct/documentations.md with format and rules
+- Updated SKILL.md overview (now lists DOCUMENTATIONS.md and docs/ directory)
+- Added "Resource ingestion" section — fetch, summarize, index
+- Added hard rule: only what appears in the resource, no outside knowledge
+- Updated SESSION.md
+
+### Current state
+Summaries go to `.learning-instruct/docs/<name>.md`. DOCUMENTATIONS.md is the
+index. Both created on first user-provided resource.
+
+### Decisions
+- Source content only — distinguishes this from SUBJECT.md (which is the
+  tutor's teaching). The docs are raw source summaries.
+- One file per resource
+- User-initiated only — tutor doesn't go sourcing documents on its own
+
+## 2026-05-16 — Add ISSUES.md and truth guideline to learning-instruct
+
+### Goal
+Add an issue log for learning problems and strengthen factual accuracy
+requirement.
+
+### What we did
+- Created skills/learning-instruct/issues.md with format (what happened,
+  root cause, how fixed, lesson)
+- Updated SKILL.md: 6 managed files (was 5), added ISSUES.md to overview
+- Added "Log issues as they happen" rule
+- Replaced "Research properly" with "Truth over confidence" rule
+
+### Current state
+ISSUES.md accumulates as user encounters and resolves problems. No
+ISSUES.md at project root yet — created on first logged issue.
+
 ## 2026-05-16 — Add SUBJECT.md to learning-instruct
 
 ### Goal
