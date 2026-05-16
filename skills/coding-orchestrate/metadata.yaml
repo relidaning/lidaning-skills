@@ -1,7 +1,4 @@
 name: coding-orchestrate
-description: >
-  Session tracking, TODO management, architecture decision records, and
-  history-aware context. Keeps the agent aware of what has been done and
-  what is next across a coding session.
+description: Track session progress with TODOs, session logs, memories, and README upkeep.
 scope: project
 tags: [orchestration, sessions, todos, architecture, context]

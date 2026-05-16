@@ -3,3 +3,7 @@ skills:
     path: skills/english-practice
   - name: coding-orchestrate
     path: skills/coding-orchestrate
+  - name: telegram-channel
+    path: skills/telegram-channel
+  - name: learning-instruct
+    path: skills/learning-instruct

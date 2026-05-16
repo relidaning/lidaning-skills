@@ -1,0 +1,12 @@
+{
+  "name": "lidaning-skills",
+  "version": "1.0.0",
+  "description": "Personal Claude Code skills manager",
+  "bin": {
+    "lidaning-skills": "./cli.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "license": "MIT"
+}

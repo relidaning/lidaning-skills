@@ -1,7 +1,4 @@
 name: english-practice
-description: >
-  Corrects non-native or awkward English expressions in chat — grammar, word
-  choice, phrasing, and tone. Keeps meaning intact while making English more
-  natural.
+description: Correct non-native English expressions in the user's messages.
 scope: global
 tags: [english, writing, communication, practice]
