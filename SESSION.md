@@ -1,5 +1,20 @@
 # Sessions
 
+## 2026-05-16 — Refine compositions.md: strikethrough over delete
+
+### Goal
+Support deprioritizing composition items without losing them — strikethrough
+with a reason instead of deletion.
+
+### What we did
+- Updated compositions.md format to show ~~strikethrough~~ items with
+  italicized reason
+- Added "Strikethrough over delete" rule
+
+### Current state
+When a part turns out unimportant or already known, it's struck through
+with a reason — the original plan stays visible.
+
 ## 2026-05-16 — Add DOCUMENTATIONS.md to learning-instruct
 
 ### Goal

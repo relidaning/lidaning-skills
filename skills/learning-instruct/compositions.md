@@ -12,10 +12,15 @@ The subject broken into teachable parts. Lives at
 2. **Generic interfaces and types** — parameterized interfaces, mapped types
 3. **Conditional types** — `extends` in type position, `infer`, distributive
    behavior
-4. **Generic classes** — type parameters on classes, static vs instance
+4. ~~**Generic classes** — type parameters on classes, static vs instance~~
+   *Skipped — user already knows class generics from Java; not worth time*
 5. **Advanced patterns** — template literal types, recursive types, branded
    types
 ```
+
+Deprioritized items use ~~strikethrough~~ on the name and description, with
+an italicized reason on the next line. They stay in the numbered list so the
+original plan is visible. Renumber if an item is removed from the middle.
 
 ## Rules
 
@@ -30,3 +35,7 @@ The subject broken into teachable parts. Lives at
   remove, or rename parts before locking it in
 - **One concept per part** — if a part has an "and" in its name, consider
   splitting it
+- **Strikethrough over delete** — when a part turns out to be unimportant,
+  already known, or not worth time, mark it with ~~strikethrough~~ and add
+  an italicized reason instead of removing it. The original plan stays
+  visible. The user can see what was considered and why it was dropped
