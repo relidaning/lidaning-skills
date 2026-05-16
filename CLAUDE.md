@@ -18,7 +18,7 @@ No build step, no lint, no tests. The repo is pure markdown + bash scripts.
 | `english-practice` | global | Corrects non-native English in user messages |
 | `coding-orchestrate` | project | Maintains SESSION.md, TODO.md, MEMORIES.md, README.md at project root |
 | `telegram-channel` | project | Polls Telegram Bot API for inbound DMs; workaround for broken native `--channels` notification path |
-| `learning-instruct` | project | Structured learning tutor — goal → breakdown → teach → evaluate |
+| `learning-instruct` | project | Structured learning tutor — goal → breakdown → teach → evaluate; maintains SUBJECT.md reference |
 
 ## Adding a skill
 

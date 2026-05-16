@@ -1,5 +1,28 @@
 # Sessions
 
+## 2026-05-16 — Add SUBJECT.md to learning-instruct
+
+### Goal
+Add a living reference file that collects key concepts, quiz Q&A, scenario
+solutions, and gotchas — so the user can review anytime.
+
+### What we did
+- Created skills/learning-instruct/subject.md with format and rules
+- Updated SKILL.md: 5 managed files (was 4), added SUBJECT.md to overview
+- Wired quiz/scenario commands to write results to SUBJECT.md immediately
+- Added "write to SUBJECT.md immediately" rule
+- Updated CLAUDE.md skills table
+
+### Current state
+SUBJECT.md accumulates as the user learns. No SUBJECT.md at project root yet —
+created when first quiz/scenario/concept is recorded.
+
+### Decisions
+- Four sections: Key Concepts, Quiz Log, Scenario Log, Gotchas
+- Concise entries (2–4 lines per concept) — not full re-explanations
+- Gotchas are high-value — collect aggressively
+- User-visible updates — tell the user when adding to their study guide
+
 ## 2026-05-16 — Add interactive hints to learning-instruct
 
 ### Goal

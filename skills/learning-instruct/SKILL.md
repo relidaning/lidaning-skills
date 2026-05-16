@@ -13,11 +13,13 @@ description: >
 ## Overview
 
 This skill tutors the user through a structured learning process. It manages
-four files under `.learning-instruct/` at the project root:
+five files under `.learning-instruct/` at the project root:
 
 - **[GOAL.md](goal.md)** — what the user wants to learn
 - **[compositions.md](compositions.md)** — the subject broken into parts
 - **[steps.md](steps.md)** — step-by-step teaching plan and progress
+- **[SUBJECT.md](subject.md)** — living reference of key concepts, quiz Q&A,
+  scenarios, and gotchas; the user's study guide
 - Evaluation — interview questions to assess mastery and find gaps
 
 ## Workflow
@@ -89,12 +91,13 @@ of the last explanation — something new that connects or extends.
 
 **`/learning-instruct quiz`** — Pop a question about the current part. Test
 understanding with a focused, single-concept question. After the user answers,
-explain the correct answer and why.
+explain the correct answer and why. Write the Q&A to SUBJECT.md.
 
 **`/learning-instruct scenario`** — Pop a realistic problem that requires
 applying the current concept. More open-ended than a quiz — the user should
 solve or design something. After they answer, evaluate their solution and
-point out what they handled well and what they missed.
+point out what they handled well and what they missed. Write the problem,
+solution, and notes to SUBJECT.md.
 
 These commands only work when a learning track is active (GOAL.md exists and
 a part is in progress). If invoked without context, guide the user back to
@@ -129,9 +132,13 @@ After all parts are taught, run a comprehensive evaluation:
   application, not just explanation
 - **Honest evaluation** — don't inflate scores. Identify real gaps so the
   user knows where to focus
+- **Write to SUBJECT.md immediately** — after every quiz, scenario, or key
+  concept explanation, add it to SUBJECT.md right away. This file is the
+  user's study guide — it should always be current and review-ready
 
 ## Additional resources
 
 - For goal format and rules, see [goal.md](goal.md)
 - For compositions format and rules, see [compositions.md](compositions.md)
 - For steps and evaluation format, see [steps.md](steps.md)
+- For subject reference format, see [subject.md](subject.md)
