@@ -13,12 +13,14 @@ No build step, no lint, no tests. The repo is pure markdown + bash scripts.
 
 ## Skills
 
-| Skill | Scope | Purpose |
+These skills auto-invoke — you don't need `/slash` commands:
+
+| Skill | Scope | Auto-trigger |
 |---|---|---|
-| `english-practice` | global | Corrects non-native English in user messages |
-| `coding-orchestrate` | project | Maintains SESSION.md, TODO.md, MEMORIES.md, README.md at project root |
-| `telegram-channel` | project | Polls Telegram Bot API for inbound DMs; workaround for broken native `--channels` notification path |
-| `learning-instruct` | project | Structured learning tutor — goal → breakdown → teach → evaluate; maintains SUBJECT.md reference |
+| `english-practice` | global | **Every user message in English.** Check grammar, phrasing, word choice before responding. |
+| `coding-orchestrate` | project | New task, "what's next?", design decisions, session end (update SESSION.md). |
+| `telegram-channel` | project | Process Telegram inbound queue via `/loop telegram-channel`. |
+| `learning-instruct` | project | User wants to learn something, asks for a study plan, or types `/learning-instruct`. |
 
 ## Adding a skill
 
