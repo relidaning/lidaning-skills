@@ -6,25 +6,24 @@ root as `SESSION.md`. Update it **before every exit** — when the user types
 
 ## Format
 
+Keep it short. 1–2 sentences per session is enough — just enough to remember
+what happened when you come back.
+
 ```markdown
 # Sessions
 
 ## 2026-05-15 — Implement user authentication
+Added JWT-based login (POST /auth/login, token validation middleware, 12 tests).
+Middleware wired but not yet required on protected routes.
+```
 
-### Goal
-Add JWT-based login flow to the API.
+If a non-obvious decision was made, fold it into the summary rather than
+adding a separate section:
 
-### What we did
-- Created POST /auth/login endpoint
-- Added token generation and validation middleware
-- Wrote integration tests (12 passing)
-
-### Current state
-Middleware wired into Express but not yet required on protected routes.
-
-### Decisions
-- Used `jsonwebtoken` over `passport` — fewer dependencies, sufficient
-- Token expiry set to 24h after discussion with frontend team
+```markdown
+## 2026-05-16 — Switch to Redis for sessions
+Moved session store from Postgres to Redis to cut login latency.
+Used ioredis over node-redis — cleaner API, better cluster support.
 ```
 
 ## Rules
@@ -32,10 +31,9 @@ Middleware wired into Express but not yet required on protected routes.
 - **One file** — `SESSION.md` at project root, newest session first
 - **Update before exit** — capture what happened before the session ends.
   Don't wait until the user asks.
-- **Goal at the top** — set at session start, update if it changes
-- **What we did** — meaningful steps completed, not every file edit
-- **Current state** — what's in progress, what's blocked, what's next.
-  Critical for fast context resumption.
-- **Decisions** — capture why, not just what. Non-obvious choices only.
+- **1–2 sentences** — a title line and a body line. No sections, no bullet
+  lists. If it needs more, the session was too broad.
+- **Include decisions inline** — if you made a non-obvious choice, mention
+  the why in the same sentence. No separate Decisions section.
 - **Read on resume** — when the user says "continue", read the last session
   entry first to understand where things left off.

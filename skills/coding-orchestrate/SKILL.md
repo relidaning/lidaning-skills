@@ -11,7 +11,7 @@ description: >
 
 This skill keeps four files at the project root in sync with reality:
 
-- **[SESSION.md](sessions.md)** — what happened each session.
+- **[SESSION.md](sessions.md)** — 1–2 sentences per session.
   **Update before every exit.**
 - **[TODO.md](todos.md)** — things discovered during conversation that need
   doing. Add as they surface.
@@ -28,12 +28,12 @@ This skill keeps four files at the project root in sync with reality:
 
 ## Rules summary
 
-| File | When | Why |
-|---|---|---|
-| SESSION.md | Before `/exit` or session end | Record what happened, current state, decisions |
-| TODO.md | As things are discovered in conversation | Never lose a task to chat scroll |
-| MEMORIES.md | When user says "remember that…" | Persist explicit user preferences and conventions |
-| README.md | When concepts, features, or mechanisms change | Onboard new readers in 5 minutes |
+| File        | When                                          | Why                                               |
+| ----------- | --------------------------------------------- | ------------------------------------------------- |
+| SESSION.md  | Before `/exit` or session end                 | 1–2 sentence summary of what happened |
+| TODO.md     | As things are discovered in conversation      | Never lose a task to chat scroll                  |
+| MEMORIES.md | When user says "remember that…"               | Persist explicit user preferences and conventions |
+| README.md   | When concepts, features, or mechanisms change | Onboard new readers in 5 minutes                  |
 
 ## Additional resources
 
