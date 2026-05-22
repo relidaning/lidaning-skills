@@ -17,9 +17,10 @@ markdown content — goal, compositions, steps, subject reference, issues log,
 and documentation summaries. It hands all output to the coding-orchestrate
 skill, which owns the recording layer and knows where to persist it.
 
-This skill does **not** write files directly. It does **not** know about the
-vault, local directories, or any file paths. It generates content and passes
-it to coding-orchestrate for storage.
+This skill does **not** write files directly. It generates content and passes
+it to coding-orchestrate for storage. Before handing off, it detects whether
+a notes MCP (like Obsidian) is connected and asks the user where to store
+the materials — vault or local project.
 
 ### Generated files (handed to coding-orchestrate)
 
@@ -71,6 +72,21 @@ Make a judgment call and state it:
 > to that level.
 
 Let the user correct. This level drives the depth and pace of Phase 3.
+
+#### Storage location
+
+Once the goal and level are set, check whether a notes-capable MCP is connected
+(e.g., tools prefixed with `obsidian_` or similar vault/note-writing tools in the
+tool list). If one is available, ask:
+
+> I see [MCP name] is connected. Should I store your learning materials in the
+> vault (under `obsidian-rag/`), or keep them in the local project?
+
+Default to vault if the user doesn't express a preference. Pass the choice to
+coding-orchestrate along with the content — it knows the actual paths.
+
+If no notes MCP is connected, skip the question and hand content to
+coding-orchestrate for local project storage.
 
 ### Phase 2: Compose
 
@@ -145,8 +161,9 @@ Hand all evaluation output to coding-orchestrate for recording.
 ## Rules
 
 - **Generate, don't write** — this skill generates markdown content and hands
-  it to coding-orchestrate. It never writes files directly. It doesn't know
-  about vault paths, local directories, or I/O mechanisms
+  it to coding-orchestrate. It never writes files directly. It checks for
+  connected notes MCPs to offer the user a storage choice (vault vs project),
+  but doesn't know vault paths or I/O details — coding-orchestrate handles that
 - **Files evolve with conversation** — the generated content is live, not
   one-time. Whenever the conversation changes something (goal shifts,
   composition reordered, part mastered, new insight surfaced), regenerate
