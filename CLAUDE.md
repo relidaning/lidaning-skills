@@ -21,6 +21,8 @@ These skills auto-invoke — you don't need `/slash` commands:
 | `coding-orchestrate` | project | New task, "what's next?", design decisions, session end (update SESSION.md). |
 | `telegram-channel` | project | Process Telegram inbound queue via `/loop telegram-channel`. |
 | `learning-instruct` | project | User wants to learn something, asks for a study plan, or types `/learning-instruct`. |
+| `obsidian-local` | project | Local Obsidian vault via REST API MCP. Search, read, create, update, revise, delete notes. |
+| `rag-chroma` | project | General-purpose RAG. Ingest documents (md, URLs, PDFs, Excel, Word), embed, store. Agent decides when to retrieve. Requires `docker compose -f skills/rag-chroma/docker-compose.yml up -d`. |
 
 ## Adding a skill
 

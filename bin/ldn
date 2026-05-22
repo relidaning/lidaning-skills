@@ -106,7 +106,9 @@ cmd_add() {
   fi
 
   # Build gum args: each --selected is a separate flag
-  local gum_args=(choose --no-limit --header="Select skills to add (space=toggle, enter=confirm)")
+  local gum_args=(choose --no-limit --header="Select skills to add (space=toggle, enter=confirm)" \
+    --cursor-prefix="▏" --cursor.foreground="#FF6B6B" \
+    --selected-prefix="☑ " --unselected-prefix="☐ ")
   for s in "${selected[@]}"; do
     gum_args+=(--selected="$s")
   done
@@ -163,7 +165,9 @@ cmd_rm() {
 
   local chosen
   chosen=$(printf '%s\n' "${installed_skills[@]}" | gum choose --no-limit \
-    --header="Select skills to remove (space=toggle, enter=confirm)") || {
+    --header="Select skills to remove (space=toggle, enter=confirm)" \
+    --cursor-prefix="▏" --cursor.foreground="#FF6B6B" \
+    --selected-prefix="☑ " --unselected-prefix="☐ ") || {
     echo "Cancelled."
     exit 0
   }

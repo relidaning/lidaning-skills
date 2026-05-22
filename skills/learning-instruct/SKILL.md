@@ -12,26 +12,33 @@ description: >
 
 ## Overview
 
-This skill tutors the user through a structured learning process. It manages
-files under `.learning-instruct/` at the project root:
+This skill tutors the user through a structured learning process. It generates
+markdown content — goal, compositions, steps, subject reference, issues log,
+and documentation summaries. It hands all output to the coding-orchestrate
+skill, which owns the recording layer and knows where to persist it.
 
-- **[GOAL.md](goal.md)** — what the user wants to learn
+This skill does **not** write files directly. It does **not** know about the
+vault, local directories, or any file paths. It generates content and passes
+it to coding-orchestrate for storage.
+
+### Generated files (handed to coding-orchestrate)
+
+- **GOAL.md** — what the user wants to learn
 - **[compositions.md](compositions.md)** — the subject broken into parts
 - **[steps.md](steps.md)** — step-by-step teaching plan and progress
-- **[SUBJECT.md](subject.md)** — living reference of key concepts, quiz Q&A,
-  scenarios, and gotchas; the user's study guide
-- **[ISSUES.md](issues.md)** — problems encountered, root causes, how they
-  were resolved, and lessons learned
-- **[DOCUMENTATIONS.md](documentations.md)** — index of user-provided
-  resources summarized into `docs/`; source content only, no added knowledge
+- **`<Subject>.md`** ([format](subject.md)) — living reference named after the
+  subject; key concepts, quiz Q&A, scenarios, and gotchas
+- **[ISSUES.md](issues.md)** — problems encountered, root causes, resolutions
+- **[DOCUMENTATIONS.md](documentations.md)** — index of user-provided resources
+  summarized into `docs/`
 - Evaluation — interview questions to assess mastery and find gaps
 
 ## Workflow
 
 ### Phase 1: Goal
 
-If `.learning-instruct/GOAL.md` doesn't exist, **read the project first** to
-understand what the user is working on. Look at:
+If no goal is active (check with coding-orchestrate), **read the project
+first** to understand what the user is working on. Look at:
 
 - `CLAUDE.md` — project overview and skills
 - `SESSION.md` — recent session goals and current state
@@ -48,8 +55,8 @@ learn? Present it plainly:
 > what you actually want to learn — be specific about the subject and what
 > level of mastery you're aiming for.
 
-Let the user confirm or correct. Once confirmed, write to `GOAL.md` using the
-format in [goal.md](goal.md).
+Let the user confirm or correct. Once confirmed, generate GOAL.md content and
+hand it to coding-orchestrate for recording.
 
 If the project context doesn't give enough signal, fall back to asking:
 
@@ -68,8 +75,8 @@ Let the user correct. This level drives the depth and pace of Phase 3.
 ### Phase 2: Compose
 
 Research the goal topic (use web search). Break it down into logical parts —
-concepts, skills, or subtopics that build on each other. Write to
-`compositions.md` using the format in [compositions.md](compositions.md).
+concepts, skills, or subtopics that build on each other. Generate
+compositions.md content and hand to coding-orchestrate.
 
 Present the breakdown to the user. Let them reorder, add, or remove parts
 before proceeding.
@@ -83,7 +90,7 @@ Work through each composition part one at a time. For each part:
 3. Have them apply it (write code, solve a problem, explain back)
 4. Mark the part as done only when they demonstrate understanding
 
-Track progress in `steps.md` using the format in [steps.md](steps.md).
+Hand steps.md updates to coding-orchestrate as progress is made.
 
 #### Interactive hints
 
@@ -95,36 +102,30 @@ of the last explanation — something new that connects or extends.
 
 **`/learning-instruct quiz`** — Pop a question about the current part. Test
 understanding with a focused, single-concept question. After the user answers,
-explain the correct answer and why. Write the Q&A to SUBJECT.md.
+explain the correct answer and why. Hand the Q&A to coding-orchestrate for
+the subject file.
 
 **`/learning-instruct scenario`** — Pop a realistic problem that requires
 applying the current concept. More open-ended than a quiz — the user should
 solve or design something. After they answer, evaluate their solution and
-point out what they handled well and what they missed. Write the problem,
-solution, and notes to SUBJECT.md.
+point out what they handled well and what they missed. Hand the problem,
+solution, and notes to coding-orchestrate for the subject file.
 
-These commands only work when a learning track is active (GOAL.md exists and
-a part is in progress). If invoked without context, guide the user back to
-the current part.
+These commands only work when a learning track is active (goal exists and
+a part is in progress).
 
 #### Resource ingestion
 
 When the user provides a URL or document during a learning track:
 
-1. Create `.learning-instruct/docs/` if it doesn't exist (`mkdir -p`)
-2. Fetch and read the resource (use WebFetch for URLs, Read for local files)
-3. **Write the summary file to disk** — `.learning-instruct/docs/<name>.md`.
-   This is the deliverable. Do NOT just describe the content in chat — the
-   user must be able to `ls` the file and read it later.
-4. Add an index entry to `DOCUMENTATIONS.md` and write that file too
+1. Fetch and read the resource (use WebFetch for URLs, Read for local files)
+2. Generate a summary file — source content only, no added knowledge
+3. Generate an updated DOCUMENTATIONS.md index entry
+4. Hand both to coding-orchestrate for recording
 
 **Critical rule: source content only.** Summarize what the resource actually
 says. Do NOT mix in explanations, context, or corrections from your own
 knowledge. The summary must be a faithful mirror of the source.
-
-**The files on disk are the proof of work.** If there's no file under
-`.learning-instruct/docs/`, the ingestion didn't happen. Chat text doesn't
-count. Always verify with `ls` after writing.
 
 See [documentations.md](documentations.md) for format and full rules.
 
@@ -136,22 +137,25 @@ After all parts are taught, run a comprehensive evaluation:
    practical, and scenario-based
 2. Ask them one at a time. Evaluate each answer.
 3. Score each composition area: mastered / proficient / needs work
-4. Write findings to `steps.md` under an Evaluation section
+4. Generate findings for steps.md under an Evaluation section
 5. Recommend which parts to revisit and how to strengthen them
+
+Hand all evaluation output to coding-orchestrate for recording.
 
 ## Rules
 
-- **Files evolve with conversation** — the managed markdown files are live
-  documents, not one-time writes. Whenever the conversation changes something
-  (goal shifts, composition reordered, part mastered, new insight surfaced,
-  exercise completed, level adjusted), update the relevant file immediately.
-  Don't batch updates — write as you go.
+- **Generate, don't write** — this skill generates markdown content and hands
+  it to coding-orchestrate. It never writes files directly. It doesn't know
+  about vault paths, local directories, or I/O mechanisms
+- **Files evolve with conversation** — the generated content is live, not
+  one-time. Whenever the conversation changes something (goal shifts,
+  composition reordered, part mastered, new insight surfaced), regenerate
+  the relevant content and hand it off. Don't batch — update as you go
 - **Goal first** — don't skip to teaching without a clear, specific goal
 - **Truth over confidence** — every explanation, concept, quiz answer, and
   scenario solution must be factually correct. Verify claims with web search
-  before teaching. If you're unsure about something, say so and look it up —
-  never guess or fabricate. One wrong "fact" taught to the user erodes trust
-  in the entire track. Cite sources when they're non-obvious
+  before teaching. If unsure, say so and look it up — never guess. Cite sources
+  when non-obvious
 - **User owns the breakdown** — present compositions for approval; let them
   reshape it
 - **Mastery over coverage** — don't move to the next part until the user
@@ -160,16 +164,13 @@ After all parts are taught, run a comprehensive evaluation:
   application, not just explanation
 - **Honest evaluation** — don't inflate scores. Identify real gaps so the
   user knows where to focus
-- **Write to SUBJECT.md immediately** — after every quiz, scenario, or key
-  concept explanation, add it to SUBJECT.md right away. This file is the
-  user's study guide — it should always be current and review-ready
-- **Log issues as they happen** — when the user hits a misunderstanding,
-  gets a quiz wrong, or struggles with a concept, write it to ISSUES.md.
-  Capture what happened, the root cause, how it was resolved, and the lesson
-- **Document ingestion writes real files** — when the user provides a URL or
-  document, the deliverable is a file on disk under `.learning-instruct/docs/`,
-  not chat text. Create the directory if missing. Verify with `ls` after
-  writing. The DOCUMENTATIONS.md index must be kept current
+- **Write to the subject content immediately** — after every quiz, scenario, or
+  key concept explanation, generate the update for the subject file right away
+- **Detect and record issues proactively** — when a learning track is active,
+  watch the conversation for signs of a problem: the user pastes an error,
+  describes a blocker, expresses confusion, gets a quiz wrong, or says
+  something didn't work. Recognize it as an issue and generate ISSUES.md
+  content without the user having to ask
 
 ## Additional resources
 

@@ -1,14 +1,18 @@
-# SUBJECT.md
+# Subject reference file
 
 A living reference of the subject being learned — key concepts, quiz
 questions with answers, scenarios with solutions, and gotchas. Lives at
-`.learning-instruct/SUBJECT.md`. Accumulates as the user progresses, so they
-can review anytime to memorize and reinforce.
+`.learning-instruct/<Subject>.md`, named after the subject itself (e.g.,
+`TypeScript-Generics.md`, `Rust-Ownership.md`). Accumulates as the user
+progresses, so they can review anytime to memorize and reinforce.
+
+The file is created during Phase 2 (Compose) when the subject is confirmed.
+Update it as teaching goes — every quiz, scenario, and key concept adds to it.
 
 ## Format
 
 ```markdown
-# Subject Reference
+# Subject Reference: <Subject Name>
 
 ## Key Concepts
 

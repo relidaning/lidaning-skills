@@ -46,6 +46,10 @@ Don't assume `ReadonlyArray<T>` is "deep enough" for your use case.
 
 ## Rules
 
+- **Detect issues from conversation** — when a learning track is active,
+  watch for signals: the user pastes an error, describes something not working,
+  expresses confusion, gets a quiz wrong, or hits a blocker. Recognize these
+  as issues and write them to ISSUES.md automatically. No command needed.
 - **Write when something goes wrong** — a quiz answer missed, a scenario
   solved incorrectly, a concept the user struggled to grasp, a blocker
   that took real work to resolve

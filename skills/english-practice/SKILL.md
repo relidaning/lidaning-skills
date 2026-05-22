@@ -1,9 +1,7 @@
 ---
 name: english-practice
 description: >
-  Correct non-native or awkward English expressions in the user's messages.
-  Use when the user writes anything in English — check for grammar mistakes,
-  awkward phrasing, unnatural word choices, or incorrect sentence structure.
+  Every message a user sent in English, check it whether appropraite or not in grammar, unnatural words choice, or expressions.
 ---
 
 ## Instructions
@@ -24,9 +22,7 @@ description: >
    Here are what you response to user's ask.
 
 5. Do NOT correct if:
-   - The meaning is clear and the issue is trivial (a missing comma)
-   - The user is in the middle of a fast back-and-forth
-   - The user explicitly asks you not to
+   - The user explicitly asks you not to.
 
 ## Examples
 
@@ -37,7 +33,7 @@ description: >
 😜 You should use declarative word order in declarative sentences.
 === English Correction ===
 
-You build it by docker and you can access it and test it.
+You could build it by docker and you can access it and test it.
 
 ```bash
 cd /path/to/target && docker compose up -d --build

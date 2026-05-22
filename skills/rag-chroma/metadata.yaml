@@ -1,0 +1,10 @@
+name: rag-chroma
+description: General-purpose RAG pipeline. Ingest documents (markdown, URLs, PDFs, Excel, Word), embed, and retrieve by meaning. Agent decides when to pull stored context.
+scope: project
+tags:
+  - rag
+  - chromadb
+  - embeddings
+  - semantic-search
+  - vector-store
+  - document-ingestion
