@@ -3,11 +3,11 @@ skills:
     path: skills/english-practice
   - name: coding-orchestrate
     path: skills/coding-orchestrate
-  - name: telegram-channel
-    path: skills/telegram-channel
   - name: learning-instruct
     path: skills/learning-instruct
   - name: obsidian-local
     path: skills/obsidian-local
   - name: rag-chroma
     path: skills/rag-chroma
+  - name: model-switch
+    path: skills/model-switch

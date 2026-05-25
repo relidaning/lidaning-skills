@@ -10,7 +10,7 @@ description: >
 ## Overview
 
 Connects to the Obsidian Local REST API plugin (coddingtonbear, v4.0.3+)
-running at `https://127.0.0.1:27124`. Two access paths:
+running at `$OBSIDIAN_MCP_URL` (default `http://127.0.0.1:27123`). Two access paths:
 
 - **obsidian MCP** (cyanheads/obsidian-mcp-server, stdio) — high-level tools
   for get/write/patch/append/search/list/tags
@@ -43,8 +43,8 @@ Obsidian must be running with the Local REST API plugin enabled.
 When MCP tools return 404, use `curl` directly:
 
 ```bash
-curl -sk -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" \
-  "https://127.0.0.1:27124/vault/<path>"
+curl -s -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" \
+  "$OBSIDIAN_MCP_URL/vault/<path>"
 ```
 
 Endpoints: `GET /vault/` (list), `GET /vault/<path>` (read),

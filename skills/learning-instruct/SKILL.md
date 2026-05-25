@@ -27,8 +27,9 @@ the materials — vault or local project.
 - **GOAL.md** — what the user wants to learn
 - **[compositions.md](compositions.md)** — the subject broken into parts
 - **[steps.md](steps.md)** — step-by-step teaching plan and progress
-- **`<Subject>.md`** ([format](subject.md)) — living reference named after the
-  subject; key concepts, quiz Q&A, scenarios, and gotchas
+- **`<Subject>.md`** ([format](subject.md)) — comprehensive living reference
+  named after the subject; ALL key concepts in depth, quiz Q&A, scenarios,
+  and gotchas. A standalone study guide, not a quick-reference card
 - **[ISSUES.md](issues.md)** — problems encountered, root causes, resolutions
 - **[DOCUMENTATIONS.md](documentations.md)** — index of user-provided resources
   summarized into `docs/`
@@ -75,18 +76,21 @@ Let the user correct. This level drives the depth and pace of Phase 3.
 
 #### Storage location
 
-Once the goal and level are set, check whether a notes-capable MCP is connected
-(e.g., tools prefixed with `obsidian_` or similar vault/note-writing tools in the
-tool list). If one is available, ask:
+Once the goal and level are set, check whether Obsidian is reachable. Probe it
+silently using the env vars defined in the obsidian-local skill (`$OBSIDIAN_MCP_URL`
+and `$OBSIDIAN_MCP_TOKEN`):
 
-> I see [MCP name] is connected. Should I store your learning materials in the
-> vault (under `obsidian-rag/`), or keep them in the local project?
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" \
+  "$OBSIDIAN_MCP_URL/vault/"
+```
 
-Default to vault if the user doesn't express a preference. Pass the choice to
-coding-orchestrate along with the content — it knows the actual paths.
-
-If no notes MCP is connected, skip the question and hand content to
-coding-orchestrate for local project storage.
+- **Obsidian reachable (2xx)** — write subject files directly to the vault under
+  `obsidian-rag/<Subject>.md` via `PUT $OBSIDIAN_MCP_URL/vault/obsidian-rag/<Subject>.md`.
+  Do **not** ask the user; just write there and tell them the note path. On every
+  subsequent update, overwrite the same path.
+- **Obsidian unreachable** — fall back to coding-orchestrate for local project storage.
 
 ### Phase 2: Compose
 
@@ -101,10 +105,20 @@ before proceeding.
 
 Work through each composition part one at a time. For each part:
 
-1. Explain the concept clearly, with examples
-2. Ask the user questions to check understanding
-3. Have them apply it (write code, solve a problem, explain back)
-4. Mark the part as done only when they demonstrate understanding
+1. **Explain comprehensively** — cover the core idea, how it works, use cases,
+   variants/forms, edge cases & limitations, connections to other concepts,
+   and common mistakes. Don't just teach the happy path — go deep on every
+   subtopic that falls under this part. Use web search to verify your
+   explanations and to find important points you might have missed.
+2. **Check understanding** — ask targeted questions that probe edge cases
+   and connections, not just recall of the definition
+3. **Apply** — have the user write code, solve a problem, or explain back.
+   Choose exercises that exercise the tricky parts, not just the basics
+4. **Audit coverage** — before marking done, check: did you cover EVERY
+   subtopic listed in the compositions breakdown? Did you miss any edge
+   cases, variants, or "what you can't do" items? Go back and fill gaps
+5. Mark the part as done only when understanding is demonstrated AND all
+   subtopics are covered
 
 Hand steps.md updates to coding-orchestrate as progress is made.
 
@@ -169,6 +183,11 @@ Hand all evaluation output to coding-orchestrate for recording.
   composition reordered, part mastered, new insight surfaced), regenerate
   the relevant content and hand it off. Don't batch — update as you go
 - **Goal first** — don't skip to teaching without a clear, specific goal
+- **Comprehensiveness over brevity** — in teaching content (subject.md,
+  steps.md), depth beats conciseness. Cover ALL key concepts, subtopics,
+  edge cases, variants, connections, and common mistakes. A reader should
+  learn the topic from these files alone. Don't skip the "boring" parts —
+  limitations and what-you-can't-do are often the most valuable
 - **Truth over confidence** — every explanation, concept, quiz answer, and
   scenario solution must be factually correct. Verify claims with web search
   before teaching. If unsure, say so and look it up — never guess. Cite sources
@@ -188,6 +207,12 @@ Hand all evaluation output to coding-orchestrate for recording.
   describes a blocker, expresses confusion, gets a quiz wrong, or says
   something didn't work. Recognize it as an issue and generate ISSUES.md
   content without the user having to ask
+- **Track gaps in the subject file as they happen** — whenever the user answers
+  incorrectly, partially, or expresses uncertainty during Phase 3, immediately
+  update the subject file to mark that concept with a `> **Needs review:**`
+  blockquote explaining what they missed and why. Do not wait for the Phase 4
+  evaluation. If Obsidian is reachable, write the updated file to the vault
+  right away so the note reflects the current state of the conversation
 
 ## Additional resources
 

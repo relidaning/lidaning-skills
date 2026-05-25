@@ -17,9 +17,8 @@ These skills auto-invoke — you don't need `/slash` commands:
 
 | Skill | Scope | Auto-trigger |
 |---|---|---|
-| `english-practice` | global | **Every user message in English.** Check grammar, phrasing, word choice before responding. |
+| `english-practice` | project | **Every user message, regardless of language.** Always respond in English. Check grammar, phrasing, word choice before responding. |
 | `coding-orchestrate` | project | New task, "what's next?", design decisions, session end (update SESSION.md). |
-| `telegram-channel` | project | Process Telegram inbound queue via `/loop telegram-channel`. |
 | `learning-instruct` | project | User wants to learn something, asks for a study plan, or types `/learning-instruct`. |
 | `obsidian-local` | project | Local Obsidian vault via REST API MCP. Search, read, create, update, revise, delete notes. |
 | `rag-chroma` | project | General-purpose RAG. Ingest documents (md, URLs, PDFs, Excel, Word), embed, store. Agent decides when to retrieve. Requires `docker compose -f skills/rag-chroma/docker-compose.yml up -d`. |
@@ -32,22 +31,6 @@ These skills auto-invoke — you don't need `/slash` commands:
 4. Install: `./install.sh <name> --global` or `--project`.
 
 Skill frontmatter reference: `how-to-use-skills-in-claude-code.md`.
-
-## telegram-channel architecture
-
-This skill bypasses the broken native `notifications/claude/channel` path. Instead of
-relying on the MCP server's internal poller to deliver inbound messages, it polls
-the Bot API directly:
-
-- `scripts/fetch.sh` — calls `getUpdates`, filters by `access.json` allowlist, appends
-  new DMs as JSONL to `~/.claude/channels/telegram/queue.jsonl`
-- `scripts/drain.sh` — atomically moves the queue file and prints contents for processing
-- `scripts/check-conflicts.sh` — diagnoses other processes holding the getUpdates connection
-
-**Conflict constraint:** Telegram allows only one `getUpdates` consumer per bot token.
-The MCP server's internal `bot.start()` holds this connection. To use `telegram-channel`,
-the MCP server's poller must be stopped — but the MCP tools (`reply`, `react`, etc.)
-live in the same process. This is an unresolved tension (TODO.md).
 
 ## Session tracking
 

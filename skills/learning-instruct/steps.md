@@ -2,9 +2,11 @@
 
 Teaching progress and a detailed knowledge reference. Lives at
 `.learning-instruct/steps.md`. Tracks which compositions have been taught,
-but more importantly records the actual knowledge shared — explanations,
-examples, insights, edge cases, and exercises — so the user can review
-and recall the material later without re-reading the chat.
+but more importantly records the full scope of knowledge shared — every
+explanation, example, insight, edge case, variant, connection, and exercise —
+so the user can review and recall the material later without re-reading
+the chat. This file is the **complete transcript of teaching**, not an
+outline or summary.
 
 ## Format
 
@@ -33,17 +35,42 @@ function getProperty<T extends { id: number }>(obj: T) {
   return obj.id; // OK — T is guaranteed to have id
 }
 ```
+Misuse: over-constraining. If you only need `.id`, constrain to `{ id: number }`,
+not `{ id: number; name: string }`.
 
-### Key insights
-- Inference beats explicit annotation in most cases — let TS do the work
-- Constraints let you access known properties on an otherwise generic type
-- Generic functions are functions that return the *same* type you pass in,
-  not just `any`
+**Multiple type parameters** — functions can declare more than one type
+parameter. Order matters for inference — leading parameters infer first,
+trailing ones must be explicit.
+```ts
+function pair<T, U>(first: T, second: U): [T, U] {
+  return [first, second];
+}
+```
+
+**Optional type parameters** — default types for when the caller doesn't
+specify:
+```ts
+function createMap<K, V = string>(): Map<K, V> { ... }
+```
+
+### Full coverage checklist
+
+Every subtopic in this composition part. Nothing skipped:
+
+- [x] Declaring type parameters (`<T>`)
+- [x] Inference from arguments
+- [x] Constraints (`extends`)
+- [x] Multiple type parameters and inference order
+- [x] Default type parameters
+- [x] Explicit type argument syntax (`identity<string>(...)`)
+- [x] Generic arrow functions (`const fn = <T>(x: T) => x`)
+- [x] What you CAN'T do with generics (no `new T()`, no `instanceof T`)
 
 ### Edge cases discussed
 - What happens when no argument matches the constrained position
 - Inference with union arguments: `identity<string | number>("hello")` infers
   `T = string | number` only if the argument is typed that way
+- Inference fails with conflicting candidates — TS errors, doesn't pick one
 
 ### Exercise & outcome
 User wrote `first<T>(arr: T[]): T | undefined` — handled empty array case.
@@ -81,14 +108,20 @@ by side.
 
 ## Rules
 
-- **Write the knowledge, not just the outline** — after teaching a concept,
-  record the explanation, code examples, key insights, and edge cases in
-  steps.md. Someone reading this file should understand the material, not
-  just see a list of topic names.
+- **Write the full knowledge, not highlights** — after teaching a concept,
+  record every explanation, code example, edge case, variant, connection to
+  other concepts, and common mistake discussed. Someone reading this file
+  should be able to learn the material, not just see a list of topic names.
+- **Coverage checklist required** — each part must include a checklist of
+  EVERY subtopic that falls under it. Mark each as taught. The checklist
+  ensures nothing slips through. Audit it before marking a part done.
 - **One part at a time** — don't teach the next until the current one clicks
-- **Code examples are essential** — include the actual code written or shown.
-  The user will review these later; seeing the code is better than reading a
-  description of it.
+- **Code examples are essential** — include every code snippet written or
+  shown. The user will review these later; seeing the actual code is better
+  than reading a description of it.
+- **Don't skip the "boring" parts** — a concept's edge cases, limitations,
+  and what-you-can't-do are often more valuable than the happy path. Cover
+  them and record them.
 - **Exercise every part** — the user must apply the concept, not just hear
   about it. Record what they built and how it went.
 - **Evaluation is honest** — "Needs work" is more useful than polite

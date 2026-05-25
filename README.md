@@ -7,36 +7,37 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 
 | Skill | Scope | Description |
 |---|---|---|
-| `english-practice` | global | Corrects non-native English expressions. Grammar, word choice, phrasing. |
+| `english-practice` | project | Always responds in English; corrects grammar, word choice, phrasing. |
 | `coding-orchestrate` | project | Session tracking, TODO management, ADR records, history context. |
+| `learning-instruct` | project | Structured learning tutor with goal setting, teaching steps, and quizzes. |
+| `model-switch` | project | Route Claude Code requests to DeepSeek, GLM, Kimi, or OpenRouter. |
+| `obsidian-local` | project | Local Obsidian vault via REST API MCP — search, read, create, update notes. |
+| `rag-chroma` | project | General-purpose RAG: ingest docs/URLs/PDFs, embed, store, retrieve. |
 
 ## Quick start
 
 ```bash
-# List available skills
-./install.sh --list
+# Interactive checkbox UI — toggle skills on/off (requires gum)
+ldn
 
-# Install a global skill (personal, all projects)
-./install.sh english-practice --global
+# Plain list with install status
+ldn list
 
-# Install a project skill (current repo only)
-./install.sh coding-orchestrate --project
+# Remove installed skills
+ldn rm
 
-# Remove
-./install.sh --remove english-practice --global
+# Or use install.sh directly
+./install.sh english-practice --project
+./install.sh --remove english-practice --project
 ```
 
 ## How it works
 
-`install.sh` creates a symlink:
+`install.sh` (or `ldn`) creates a symlink in `.claude/skills/<name>/` (project)
+or `~/.claude/skills/<name>/` (global). Claude Code discovers the directory
+automatically.
 
-```
-~/.claude/skills/english-practice/SKILL.md
-  → lidaning-skills/skills/english-practice/skill.md
-```
-
-Claude Code discovers it automatically. Edit `skill.md`, changes take effect
-immediately — Claude Code watches skill directories for live changes.
+Edit `SKILL.md` directly — changes take effect after a session restart.
 
 Invoke a skill with `/skill-name`, or let Claude auto-invoke it when your
 message matches the skill's `description`.
@@ -91,7 +92,7 @@ Add an entry to `registry.yaml` and install.
 
 ```bash
 vim skills/english-practice/SKILL.md
-# Done. Live reload picks it up — no restart, no rebuild.
+# Restart the Claude Code session to pick up changes.
 ```
 
 ## Directory structure
@@ -101,15 +102,13 @@ lidaning-skills/
 ├── README.md
 ├── registry.yaml
 ├── install.sh
+├── bin/ldn                  # skill manager CLI
 ├── how-to-use-skills-in-claude-code.md
 └── skills/
     ├── english-practice/
-    │   ├── SKILL.md
-    │   └── metadata.yaml
-    └── coding-orchestrate/
-        ├── SKILL.md
-        ├── sessions.md
-        ├── todos.md
-        ├── readme.md
-        └── metadata.yaml
+    ├── coding-orchestrate/
+    ├── learning-instruct/
+    ├── model-switch/
+    ├── obsidian-local/
+    └── rag-chroma/
 ```

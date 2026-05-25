@@ -1,4 +1,0 @@
-name: telegram-channel
-description: Poll Telegram for inbound DMs and route them into Claude for reply.
-scope: project
-tags: [telegram, channel, messaging, bridge]

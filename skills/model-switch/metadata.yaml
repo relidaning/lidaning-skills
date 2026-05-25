@@ -1,0 +1,4 @@
+name: model-switch
+description: Multi-provider LLM proxy for Claude Code with in-session model switching via /model command.
+scope: project
+tags: [proxy, llm, model, deepseek, glm, kimi, anthropic, openrouter]
