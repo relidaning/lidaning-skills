@@ -10,14 +10,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   rag-mcp:
     build: ./rag-mcp
+    network_mode: host
     environment:
-      - CHROMA_HOST=chromadb
+      - CHROMA_HOST=localhost
       - CHROMA_PORT=8000
-    ports:
-      - "8081:8081"
+      - OBSIDIAN_URL=http://127.0.0.1:27123
+      - OBSIDIAN_TOKEN=${OBSIDIAN_MCP_TOKEN}
     depends_on:
       chromadb:
         condition: service_healthy
+    restart: unless-stopped
