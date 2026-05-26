@@ -201,10 +201,6 @@ app.get("/providers", (c) =>
  */
 app.get("/v1/models", (c) => {
   const models = [
-    // Anthropic (passthrough — uses your OAuth token)
-    { id: "anthropic/claude-sonnet-4-6", object: "model", owned_by: "anthropic" },
-    { id: "anthropic/claude-opus-4-7", object: "model", owned_by: "anthropic" },
-    { id: "anthropic/claude-haiku-4-5", object: "model", owned_by: "anthropic" },
     // DeepSeek
     { id: "deepseek/deepseek-chat", object: "model", owned_by: "deepseek" },
     { id: "deepseek/deepseek-reasoner", object: "model", owned_by: "deepseek" },
@@ -215,6 +211,14 @@ app.get("/v1/models", (c) => {
     { id: "kimi/moonshot-v1-8k", object: "model", owned_by: "moonshot" },
     { id: "kimi/moonshot-v1-32k", object: "model", owned_by: "moonshot" },
   ];
+  // Anthropic via proxy only when the user opted in with a developer key.
+  if (process.env.ANTHROPIC_API_KEY_REAL) {
+    models.unshift(
+      { id: "anthropic/claude-sonnet-4-6", object: "model", owned_by: "anthropic" },
+      { id: "anthropic/claude-opus-4-7", object: "model", owned_by: "anthropic" },
+      { id: "anthropic/claude-haiku-4-5", object: "model", owned_by: "anthropic" },
+    );
+  }
   return c.json({ object: "list", data: models });
 });
 
@@ -252,6 +256,24 @@ app.post("/v1/messages", async (c) => {
     const msg = `Unknown provider "${providerKey}". Available: ${Object.keys(PROVIDERS).join(", ")}`;
     console.error(msg);
     return c.json({ error: msg }, 400);
+  }
+
+  // The anthropic provider requires a developer API key (ANTHROPIC_API_KEY_REAL).
+  // OAuth subscription tokens cannot be relayed via a custom base URL — Anthropic
+  // returns 403. Users who want Sonnet on their subscription should bypass the
+  // proxy entirely (use the `sonnet` shortcut).
+  if (providerKey === "anthropic" && !process.env.ANTHROPIC_API_KEY_REAL) {
+    return c.json(
+      {
+        error: {
+          type: "configuration",
+          message:
+            "anthropic via proxy needs ANTHROPIC_API_KEY_REAL (a developer API key). " +
+            "For subscription Sonnet/Opus, launch claude without the proxy (see the `sonnet` shortcut).",
+        },
+      },
+      501,
+    );
   }
 
   body.model = modelName;
@@ -312,11 +334,14 @@ app.post("/v1/messages", async (c) => {
 // ── Catch-all: forward anything else to Anthropic with original auth ──────────
 // Handles session verification, OAuth token checks, and any other endpoints
 // Claude Code calls that are not /v1/messages or /v1/models.
+//
+// If Anthropic returns 401/403 (user is on DeepSeek-only, no valid OAuth, or
+// ANTHROPIC_API_KEY is dummy), we stub a 200 so Claude Code doesn't drop into
+// a login loop. /v1/messages still hits the configured provider directly.
 app.all("*", async (c) => {
   const rawUrl = c.req.url;
   const queryString = rawUrl.includes("?") ? "?" + rawUrl.split("?").slice(1).join("?") : "";
   const url = `https://api.anthropic.com${c.req.path}${queryString}`;
-  console.log(`→ [passthrough] ${c.req.method} ${c.req.path}`);
 
   const headers: Record<string, string> = {};
   c.req.raw.headers.forEach((val, key) => {
@@ -328,7 +353,20 @@ app.all("*", async (c) => {
       ? await c.req.raw.arrayBuffer()
       : undefined;
 
-  const upstream = await fetch(url, { method: c.req.method, headers, body });
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, { method: c.req.method, headers, body });
+  } catch (err) {
+    console.log(`→ [passthrough-stub] ${c.req.method} ${c.req.path} (upstream unreachable)`);
+    return c.json({}, 200);
+  }
+
+  if (upstream.status === 401 || upstream.status === 403) {
+    console.log(`→ [passthrough-stub] ${c.req.method} ${c.req.path} (upstream ${upstream.status})`);
+    return c.json({}, 200);
+  }
+
+  console.log(`→ [passthrough] ${c.req.method} ${c.req.path} → ${upstream.status}`);
   return new Response(upstream.body, {
     status: upstream.status,
     headers: Object.fromEntries(upstream.headers.entries()),

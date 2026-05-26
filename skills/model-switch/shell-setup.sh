@@ -56,10 +56,18 @@ _claude_via_proxy() {
     local model="$2"
     shift 2
     proxy-start
+    # Do NOT set ANTHROPIC_API_KEY — that would override Claude Code's OAuth
+    # session and cause repeated login prompts when the proxy forwards
+    # auth-verification requests upstream. The proxy injects the real
+    # provider key for /v1/messages itself.
+    #
+    # CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 makes Claude Code populate
+    # its /model picker from the proxy's /v1/models endpoint, so DeepSeek,
+    # GLM, and Kimi show up alongside the built-in Anthropic entries.
     DEFAULT_PROVIDER="$provider" \
     DEFAULT_MODEL="$model" \
     ANTHROPIC_BASE_URL="http://localhost:$CLAUDE_PROXY_PORT" \
-    ANTHROPIC_API_KEY="dummy" \
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
         claude "$@"
 }
 
@@ -83,11 +91,15 @@ kimi() {
     _claude_via_proxy "kimi" "moonshot-v1-32k" "$@"
 }
 
-# Real Anthropic (bypass proxy, use directly)
-claude-anthropic() {
+# Sonnet on your subscription (bypasses the proxy).
+# Anthropic's OAuth tokens can't be relayed via a custom ANTHROPIC_BASE_URL,
+# so Sonnet/Opus on your subscription must talk to api.anthropic.com directly.
+sonnet() {
     unset ANTHROPIC_BASE_URL
     claude "$@"
 }
+# Backward-compat alias.
+claude-anthropic() { sonnet "$@"; }
 
 # ── Status helper ─────────────────────────────────────────
 proxy-status() {
@@ -105,4 +117,4 @@ d.forEach(p=>console.log(\`  \${p.keyConfigured?'✓':'✗'} \${p.key.padEnd(12)
 }
 
 echo "Claude proxy helpers loaded. Commands: proxy-start, proxy-stop, proxy-status, proxy-logs"
-echo "Model shortcuts: deepseek, deepseek-r1, glm, kimi, claude-anthropic"
+echo "Model shortcuts: sonnet, deepseek, deepseek-r1, glm, kimi, claude-anthropic"
