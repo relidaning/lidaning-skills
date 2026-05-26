@@ -56,10 +56,13 @@ _claude_via_proxy() {
     local model="$2"
     shift 2
     proxy-start
+    # Do NOT set ANTHROPIC_API_KEY — that would override Claude Code's OAuth
+    # session and cause repeated login prompts when the proxy forwards
+    # auth-verification requests upstream. The proxy injects the real
+    # provider key for /v1/messages itself.
     DEFAULT_PROVIDER="$provider" \
     DEFAULT_MODEL="$model" \
     ANTHROPIC_BASE_URL="http://localhost:$CLAUDE_PROXY_PORT" \
-    ANTHROPIC_API_KEY="dummy" \
         claude "$@"
 }
 

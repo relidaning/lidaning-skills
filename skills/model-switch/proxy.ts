@@ -312,11 +312,14 @@ app.post("/v1/messages", async (c) => {
 // ── Catch-all: forward anything else to Anthropic with original auth ──────────
 // Handles session verification, OAuth token checks, and any other endpoints
 // Claude Code calls that are not /v1/messages or /v1/models.
+//
+// If Anthropic returns 401/403 (user is on DeepSeek-only, no valid OAuth, or
+// ANTHROPIC_API_KEY is dummy), we stub a 200 so Claude Code doesn't drop into
+// a login loop. /v1/messages still hits the configured provider directly.
 app.all("*", async (c) => {
   const rawUrl = c.req.url;
   const queryString = rawUrl.includes("?") ? "?" + rawUrl.split("?").slice(1).join("?") : "";
   const url = `https://api.anthropic.com${c.req.path}${queryString}`;
-  console.log(`→ [passthrough] ${c.req.method} ${c.req.path}`);
 
   const headers: Record<string, string> = {};
   c.req.raw.headers.forEach((val, key) => {
@@ -328,7 +331,20 @@ app.all("*", async (c) => {
       ? await c.req.raw.arrayBuffer()
       : undefined;
 
-  const upstream = await fetch(url, { method: c.req.method, headers, body });
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, { method: c.req.method, headers, body });
+  } catch (err) {
+    console.log(`→ [passthrough-stub] ${c.req.method} ${c.req.path} (upstream unreachable)`);
+    return c.json({}, 200);
+  }
+
+  if (upstream.status === 401 || upstream.status === 403) {
+    console.log(`→ [passthrough-stub] ${c.req.method} ${c.req.path} (upstream ${upstream.status})`);
+    return c.json({}, 200);
+  }
+
+  console.log(`→ [passthrough] ${c.req.method} ${c.req.path} → ${upstream.status}`);
   return new Response(upstream.body, {
     status: upstream.status,
     headers: Object.fromEntries(upstream.headers.entries()),

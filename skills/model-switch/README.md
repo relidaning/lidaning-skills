@@ -12,10 +12,13 @@ built-in `/model` picker — no restart needed.
 
 ## Auth model (important)
 
-The proxy is designed for **non-Anthropic providers only**. Claude Code's
-OAuth/subscription session token is NOT a valid Anthropic developer API key.
-Forwarding that token to `api.anthropic.com` returns 403 — the two auth
-systems are separate.
+The proxy injects the configured provider's API key on `/v1/messages` itself,
+so Claude Code does **not** need a valid `ANTHROPIC_API_KEY`. Do NOT set
+`ANTHROPIC_API_KEY` when using this proxy — setting it (even to a dummy
+value) causes Claude Code to keep prompting for login as upstream auth
+checks fail. Leave it unset and let your existing `claude auth login` OAuth
+session ride through; the proxy stubs any 401/403 Anthropic returns so the
+login loop can't trigger.
 
 | Scenario | How to launch |
 |---|---|
@@ -23,9 +26,10 @@ systems are separate.
 | Use DeepSeek / GLM / Kimi | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
 | Switch providers mid-session | `/model` picker inside a proxy session |
 
-You cannot switch between Anthropic and other providers in the same session
-unless you have a separate Anthropic developer API key (set as
-`ANTHROPIC_API_KEY_REAL`).
+You cannot switch into Anthropic (Sonnet/Opus) from within a proxy session
+unless you have a separate Anthropic developer API key set as
+`ANTHROPIC_API_KEY_REAL` — the proxy uses that for the `anthropic/*` picker
+entries, separate from your OAuth session.
 
 ## Quick Start
 
