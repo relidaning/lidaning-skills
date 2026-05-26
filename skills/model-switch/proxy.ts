@@ -263,7 +263,14 @@ app.post("/v1/messages", async (c) => {
     c.req.raw.headers.forEach((val, key) => {
       if (!ALWAYS_STRIP.has(key.toLowerCase())) headers[key] = val;
     });
-    console.log(`→ [anthropic-oauth] ${modelName} stream=${body.stream ?? false}`);
+    const authHdr = c.req.raw.headers.get("authorization") ?? "";
+    const apiKeyHdr = c.req.raw.headers.get("x-api-key") ?? "";
+    const authSummary = authHdr
+      ? `authorization=${authHdr.slice(0, 12)}…(${authHdr.length})`
+      : apiKeyHdr
+        ? `x-api-key=${apiKeyHdr.slice(0, 6)}…(${apiKeyHdr.length})`
+        : "NO_AUTH_HEADER";
+    console.log(`→ [anthropic-oauth] ${modelName} stream=${body.stream ?? false} ${authSummary}`);
 
     let upstream: Response;
     try {
@@ -275,6 +282,15 @@ app.post("/v1/messages", async (c) => {
     } catch (err) {
       console.error(`✗ Network error reaching ${config.baseUrl}:`, err);
       return c.json({ error: `Proxy network error: ${String(err)}` }, 502);
+    }
+
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      console.error(`✗ anthropic-oauth upstream ${upstream.status}: ${errText.slice(0, 400)}`);
+      return new Response(errText, {
+        status: upstream.status,
+        headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
+      });
     }
 
     if (body.stream && upstream.body) {

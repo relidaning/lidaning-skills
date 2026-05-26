@@ -60,9 +60,14 @@ _claude_via_proxy() {
     # session and cause repeated login prompts when the proxy forwards
     # auth-verification requests upstream. The proxy injects the real
     # provider key for /v1/messages itself.
+    #
+    # CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 makes Claude Code populate
+    # its /model picker from the proxy's /v1/models endpoint, so DeepSeek,
+    # GLM, and Kimi show up alongside the built-in Anthropic entries.
     DEFAULT_PROVIDER="$provider" \
     DEFAULT_MODEL="$model" \
     ANTHROPIC_BASE_URL="http://localhost:$CLAUDE_PROXY_PORT" \
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 \
         claude "$@"
 }
 
