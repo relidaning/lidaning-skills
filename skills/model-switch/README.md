@@ -29,10 +29,21 @@ the proxy also stubs any 401/403 Anthropic returns so the loop can't fire.
 | Bypass proxy entirely | `claude-anthropic` |
 | Switch providers mid-session | `/model` picker inside a proxy session |
 
-Setting `ANTHROPIC_API_KEY_REAL` to a real developer API key is optional —
-it lets the `anthropic/*` picker entries hit the developer API instead of
-OAuth, which gives you access to e.g. `claude-opus-4-7` without a Max
-subscription.
+All Anthropic models your subscription includes work via OAuth — pick
+`anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-7`, or
+`anthropic/claude-haiku-4-5` from the `/model` picker and the proxy
+forwards to `api.anthropic.com` with your OAuth token:
+
+| Plan | Models available via OAuth |
+|---|---|
+| Claude **Max** | Sonnet, Opus, Haiku |
+| Claude **Pro** | Sonnet, Haiku |
+| No subscription | none |
+
+`ANTHROPIC_API_KEY_REAL` is only required if you want a model your
+subscription doesn't include (e.g. Pro user paying per-token for Opus)
+or if you have no Anthropic subscription at all. When set, the
+`anthropic/*` entries route through the developer API instead of OAuth.
 
 ## Quick Start
 
