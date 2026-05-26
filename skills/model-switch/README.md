@@ -12,38 +12,43 @@ built-in `/model` picker — no restart needed.
 
 ## Auth model
 
-The proxy defaults to **Sonnet via your existing `claude auth login` OAuth
-session** — no developer API key required. Launching `claude` with
-`ANTHROPIC_BASE_URL=http://localhost:8787` lands you on
-`anthropic/claude-sonnet-4-6` exactly like a normal Claude Code session,
-except you can now `/model`-switch into DeepSeek/GLM/Kimi without restarting.
-
-Do NOT set `ANTHROPIC_API_KEY` — setting it (even to a dummy value)
-overrides the OAuth session and triggers a login loop. Leave it unset;
-the proxy also stubs any 401/403 Anthropic returns so the loop can't fire.
+The proxy handles **only the non-Anthropic providers** (DeepSeek, GLM, Kimi)
+out of the box. Anthropic's OAuth subscription tokens cannot be relayed
+through a custom `ANTHROPIC_BASE_URL` — Anthropic returns 403 — so the
+proxy intentionally does **not** try to use your `claude auth login`
+session.
 
 | Scenario | How to launch |
 |---|---|
-| Default: Sonnet via OAuth, switchable | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
-| Land directly on DeepSeek / GLM / Kimi | `deepseek` / `glm` / `kimi` shortcut |
-| Bypass proxy entirely | `claude-anthropic` |
-| Switch providers mid-session | `/model` picker inside a proxy session |
+| Sonnet/Opus on your subscription | `sonnet` (bypasses proxy) |
+| DeepSeek / GLM / Kimi | `deepseek` / `glm` / `kimi` (uses proxy) |
+| Switch among DeepSeek/GLM/Kimi mid-session | `/model` picker inside a proxy session |
+| Switch Sonnet ↔ DeepSeek without restart | requires `ANTHROPIC_API_KEY_REAL` — see below |
 
-All Anthropic models your subscription includes work via OAuth — pick
-`anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-7`, or
-`anthropic/claude-haiku-4-5` from the `/model` picker and the proxy
-forwards to `api.anthropic.com` with your OAuth token:
+You can't mid-session switch between your subscription Sonnet and the
+proxy providers — they live in two different `claude` processes.
 
-| Plan | Models available via OAuth |
-|---|---|
-| Claude **Max** | Sonnet, Opus, Haiku |
-| Claude **Pro** | Sonnet, Haiku |
-| No subscription | none |
+### Optional: Anthropic via proxy (developer API key)
 
-`ANTHROPIC_API_KEY_REAL` is only required if you want a model your
-subscription doesn't include (e.g. Pro user paying per-token for Opus)
-or if you have no Anthropic subscription at all. When set, the
-`anthropic/*` entries route through the developer API instead of OAuth.
+If you want `/model`-switching to include Sonnet/Opus *and* DeepSeek/GLM/Kimi
+in the same session, set a developer API key:
+
+```bash
+export ANTHROPIC_API_KEY_REAL="sk-ant-api-..."
+```
+
+The proxy then exposes `anthropic/claude-sonnet-4-6`, `anthropic/claude-opus-4-7`,
+and `anthropic/claude-haiku-4-5` in the picker and routes them through the
+developer API. You pay per token (not your subscription).
+
+### Why not OAuth?
+
+Anthropic binds OAuth session tokens to direct connections to
+`api.anthropic.com`. When a request arrives via a relay (anything reaching
+Anthropic from a TLS connection that didn't originate from Claude Code
+itself), it returns `403 forbidden / Request not allowed`. There is no
+known header/body combination that makes the OAuth path work through a
+proxy.
 
 ## Quick Start
 
@@ -119,8 +124,8 @@ proxy-logs      # tail proxy output
 
 | Variable           | Default              | Description                            |
 |--------------------|----------------------|----------------------------------------|
-| `DEFAULT_PROVIDER` | `anthropic`          | Provider used at session start         |
-| `DEFAULT_MODEL`    | `claude-sonnet-4-6`  | Model used at session start            |
+| `DEFAULT_PROVIDER` | `deepseek`           | Provider used at session start         |
+| `DEFAULT_MODEL`    | `deepseek-chat`      | Model used at session start            |
 | `PROXY_PORT`       | `8787`               | Port the proxy listens on              |
 
 ## Supported Providers

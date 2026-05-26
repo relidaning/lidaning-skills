@@ -70,8 +70,8 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER ?? "anthropic";
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "claude-sonnet-4-6";
+const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER ?? "deepseek";
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "deepseek-chat";
 const PORT = Number(process.env.PROXY_PORT ?? 8787);
 
 // Headers Claude Code sends that we should never forward upstream
@@ -201,10 +201,6 @@ app.get("/providers", (c) =>
  */
 app.get("/v1/models", (c) => {
   const models = [
-    // Anthropic (passthrough — uses your OAuth token)
-    { id: "anthropic/claude-sonnet-4-6", object: "model", owned_by: "anthropic" },
-    { id: "anthropic/claude-opus-4-7", object: "model", owned_by: "anthropic" },
-    { id: "anthropic/claude-haiku-4-5", object: "model", owned_by: "anthropic" },
     // DeepSeek
     { id: "deepseek/deepseek-chat", object: "model", owned_by: "deepseek" },
     { id: "deepseek/deepseek-reasoner", object: "model", owned_by: "deepseek" },
@@ -215,6 +211,14 @@ app.get("/v1/models", (c) => {
     { id: "kimi/moonshot-v1-8k", object: "model", owned_by: "moonshot" },
     { id: "kimi/moonshot-v1-32k", object: "model", owned_by: "moonshot" },
   ];
+  // Anthropic via proxy only when the user opted in with a developer key.
+  if (process.env.ANTHROPIC_API_KEY_REAL) {
+    models.unshift(
+      { id: "anthropic/claude-sonnet-4-6", object: "model", owned_by: "anthropic" },
+      { id: "anthropic/claude-opus-4-7", object: "model", owned_by: "anthropic" },
+      { id: "anthropic/claude-haiku-4-5", object: "model", owned_by: "anthropic" },
+    );
+  }
   return c.json({ object: "list", data: models });
 });
 
@@ -254,60 +258,25 @@ app.post("/v1/messages", async (c) => {
     return c.json({ error: msg }, 400);
   }
 
-  body.model = modelName;
-
-  // OAuth passthrough: when routing to anthropic without a developer key,
-  // forward the user's existing auth headers (OAuth bearer) straight through.
+  // The anthropic provider requires a developer API key (ANTHROPIC_API_KEY_REAL).
+  // OAuth subscription tokens cannot be relayed via a custom base URL — Anthropic
+  // returns 403. Users who want Sonnet on their subscription should bypass the
+  // proxy entirely (use the `sonnet` shortcut).
   if (providerKey === "anthropic" && !process.env.ANTHROPIC_API_KEY_REAL) {
-    const headers: Record<string, string> = {};
-    c.req.raw.headers.forEach((val, key) => {
-      if (!ALWAYS_STRIP.has(key.toLowerCase())) headers[key] = val;
-    });
-    const authHdr = c.req.raw.headers.get("authorization") ?? "";
-    const apiKeyHdr = c.req.raw.headers.get("x-api-key") ?? "";
-    const authSummary = authHdr
-      ? `authorization=${authHdr.slice(0, 12)}…(${authHdr.length})`
-      : apiKeyHdr
-        ? `x-api-key=${apiKeyHdr.slice(0, 6)}…(${apiKeyHdr.length})`
-        : "NO_AUTH_HEADER";
-    console.log(`→ [anthropic-oauth] ${modelName} stream=${body.stream ?? false} ${authSummary}`);
-
-    let upstream: Response;
-    try {
-      upstream = await fetch(config.baseUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      console.error(`✗ Network error reaching ${config.baseUrl}:`, err);
-      return c.json({ error: `Proxy network error: ${String(err)}` }, 502);
-    }
-
-    if (!upstream.ok) {
-      const errText = await upstream.text();
-      console.error(`✗ anthropic-oauth upstream ${upstream.status}: ${errText.slice(0, 400)}`);
-      return new Response(errText, {
-        status: upstream.status,
-        headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
-      });
-    }
-
-    if (body.stream && upstream.body) {
-      return new Response(upstream.body, {
-        status: upstream.status,
-        headers: {
-          "Content-Type": upstream.headers.get("content-type") ?? "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
+    return c.json(
+      {
+        error: {
+          type: "configuration",
+          message:
+            "anthropic via proxy needs ANTHROPIC_API_KEY_REAL (a developer API key). " +
+            "For subscription Sonnet/Opus, launch claude without the proxy (see the `sonnet` shortcut).",
         },
-      });
-    }
-    return new Response(await upstream.text(), {
-      status: upstream.status,
-      headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
-    });
+      },
+      501,
+    );
   }
+
+  body.model = modelName;
 
   let upstreamHeaders: Record<string, string>;
   try {

@@ -91,8 +91,8 @@ proxy-logs     # tail proxy output
 
 | Variable           | Default              | Description                       |
 |--------------------|----------------------|-----------------------------------|
-| `DEFAULT_PROVIDER` | `anthropic`          | Provider when no `/model` command |
-| `DEFAULT_MODEL`    | `claude-sonnet-4-6`  | Model when no `/model` command    |
+| `DEFAULT_PROVIDER` | `deepseek`           | Provider when no `/model` command |
+| `DEFAULT_MODEL`    | `deepseek-chat`      | Model when no `/model` command    |
 | `PROXY_PORT`       | `8787`               | Proxy listen port                 |
 
 ## Adding a provider

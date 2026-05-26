@@ -91,16 +91,15 @@ kimi() {
     _claude_via_proxy "kimi" "moonshot-v1-32k" "$@"
 }
 
-# Sonnet via proxy (default — uses OAuth, switchable to DeepSeek/GLM/Kimi mid-session)
+# Sonnet on your subscription (bypasses the proxy).
+# Anthropic's OAuth tokens can't be relayed via a custom ANTHROPIC_BASE_URL,
+# so Sonnet/Opus on your subscription must talk to api.anthropic.com directly.
 sonnet() {
-    _claude_via_proxy "anthropic" "claude-sonnet-4-6" "$@"
-}
-
-# Real Anthropic (bypass proxy entirely)
-claude-anthropic() {
     unset ANTHROPIC_BASE_URL
     claude "$@"
 }
+# Backward-compat alias.
+claude-anthropic() { sonnet "$@"; }
 
 # ── Status helper ─────────────────────────────────────────
 proxy-status() {
