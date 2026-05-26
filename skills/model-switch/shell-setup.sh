@@ -86,7 +86,12 @@ kimi() {
     _claude_via_proxy "kimi" "moonshot-v1-32k" "$@"
 }
 
-# Real Anthropic (bypass proxy, use directly)
+# Sonnet via proxy (default — uses OAuth, switchable to DeepSeek/GLM/Kimi mid-session)
+sonnet() {
+    _claude_via_proxy "anthropic" "claude-sonnet-4-6" "$@"
+}
+
+# Real Anthropic (bypass proxy entirely)
 claude-anthropic() {
     unset ANTHROPIC_BASE_URL
     claude "$@"
@@ -108,4 +113,4 @@ d.forEach(p=>console.log(\`  \${p.keyConfigured?'✓':'✗'} \${p.key.padEnd(12)
 }
 
 echo "Claude proxy helpers loaded. Commands: proxy-start, proxy-stop, proxy-status, proxy-logs"
-echo "Model shortcuts: deepseek, deepseek-r1, glm, kimi, claude-anthropic"
+echo "Model shortcuts: sonnet, deepseek, deepseek-r1, glm, kimi, claude-anthropic"

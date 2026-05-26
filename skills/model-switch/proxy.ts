@@ -70,8 +70,8 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER ?? "deepseek";
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "deepseek-chat";
+const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER ?? "anthropic";
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "claude-sonnet-4-6";
 const PORT = Number(process.env.PROXY_PORT ?? 8787);
 
 // Headers Claude Code sends that we should never forward upstream
@@ -255,6 +255,43 @@ app.post("/v1/messages", async (c) => {
   }
 
   body.model = modelName;
+
+  // OAuth passthrough: when routing to anthropic without a developer key,
+  // forward the user's existing auth headers (OAuth bearer) straight through.
+  if (providerKey === "anthropic" && !process.env.ANTHROPIC_API_KEY_REAL) {
+    const headers: Record<string, string> = {};
+    c.req.raw.headers.forEach((val, key) => {
+      if (!ALWAYS_STRIP.has(key.toLowerCase())) headers[key] = val;
+    });
+    console.log(`→ [anthropic-oauth] ${modelName} stream=${body.stream ?? false}`);
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(config.baseUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      console.error(`✗ Network error reaching ${config.baseUrl}:`, err);
+      return c.json({ error: `Proxy network error: ${String(err)}` }, 502);
+    }
+
+    if (body.stream && upstream.body) {
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: {
+          "Content-Type": upstream.headers.get("content-type") ?? "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
+    return new Response(await upstream.text(), {
+      status: upstream.status,
+      headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
+    });
+  }
 
   let upstreamHeaders: Record<string, string>;
   try {

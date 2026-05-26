@@ -10,26 +10,29 @@ built-in `/model` picker — no restart needed.
 - **tsx** — run TypeScript directly, no build step
 - **Node 18+** native `fetch`
 
-## Auth model (important)
+## Auth model
 
-The proxy injects the configured provider's API key on `/v1/messages` itself,
-so Claude Code does **not** need a valid `ANTHROPIC_API_KEY`. Do NOT set
-`ANTHROPIC_API_KEY` when using this proxy — setting it (even to a dummy
-value) causes Claude Code to keep prompting for login as upstream auth
-checks fail. Leave it unset and let your existing `claude auth login` OAuth
-session ride through; the proxy stubs any 401/403 Anthropic returns so the
-login loop can't trigger.
+The proxy defaults to **Sonnet via your existing `claude auth login` OAuth
+session** — no developer API key required. Launching `claude` with
+`ANTHROPIC_BASE_URL=http://localhost:8787` lands you on
+`anthropic/claude-sonnet-4-6` exactly like a normal Claude Code session,
+except you can now `/model`-switch into DeepSeek/GLM/Kimi without restarting.
+
+Do NOT set `ANTHROPIC_API_KEY` — setting it (even to a dummy value)
+overrides the OAuth session and triggers a login loop. Leave it unset;
+the proxy also stubs any 401/403 Anthropic returns so the loop can't fire.
 
 | Scenario | How to launch |
 |---|---|
-| Use Anthropic (Sonnet/Opus) | `claude` (normal, no proxy) |
-| Use DeepSeek / GLM / Kimi | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
+| Default: Sonnet via OAuth, switchable | `ANTHROPIC_BASE_URL=http://localhost:8787 claude` |
+| Land directly on DeepSeek / GLM / Kimi | `deepseek` / `glm` / `kimi` shortcut |
+| Bypass proxy entirely | `claude-anthropic` |
 | Switch providers mid-session | `/model` picker inside a proxy session |
 
-You cannot switch into Anthropic (Sonnet/Opus) from within a proxy session
-unless you have a separate Anthropic developer API key set as
-`ANTHROPIC_API_KEY_REAL` — the proxy uses that for the `anthropic/*` picker
-entries, separate from your OAuth session.
+Setting `ANTHROPIC_API_KEY_REAL` to a real developer API key is optional —
+it lets the `anthropic/*` picker entries hit the developer API instead of
+OAuth, which gives you access to e.g. `claude-opus-4-7` without a Max
+subscription.
 
 ## Quick Start
 
@@ -103,11 +106,11 @@ proxy-logs      # tail proxy output
 
 ## Environment Variables
 
-| Variable           | Default         | Description                            |
-|--------------------|-----------------|----------------------------------------|
-| `DEFAULT_PROVIDER` | `deepseek`      | Provider used at session start         |
-| `DEFAULT_MODEL`    | `deepseek-chat` | Model used at session start            |
-| `PROXY_PORT`       | `8787`          | Port the proxy listens on              |
+| Variable           | Default              | Description                            |
+|--------------------|----------------------|----------------------------------------|
+| `DEFAULT_PROVIDER` | `anthropic`          | Provider used at session start         |
+| `DEFAULT_MODEL`    | `claude-sonnet-4-6`  | Model used at session start            |
+| `PROXY_PORT`       | `8787`               | Port the proxy listens on              |
 
 ## Supported Providers
 
