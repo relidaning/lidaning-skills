@@ -54,9 +54,10 @@ Endpoints: `GET /vault/` (list), `GET /vault/<path>` (read),
 
 ### Search notes
 
-1. Try `obsidian_search_notes` with text or JSONLogic mode
-2. If it 404s, fall back to grepping via direct REST API reads
-3. Present matching paths and snippets
+1. **If RAG is available** (`rag_search` tool present): call `rag_search(query, k=10)` first — it returns semantic matches with vault-relative paths and snippets. Use those paths to read full notes as needed.
+2. If RAG is unavailable or returns no useful results, try `obsidian_search_notes` with text or JSONLogic mode.
+3. If that 404s, fall back to grepping via direct REST API reads.
+4. Present matching paths and snippets.
 
 ### Read a note
 
@@ -80,6 +81,7 @@ Or `PUT /vault/path%2Fto%2Fnote.md` via REST API.
 
 ## Rules
 
+- **RAG first for search** — if `rag_search` is available, always try it before `obsidian_search_notes`; RAG gives semantic matches across the whole vault without requiring an exact path
 - **Search before read** — if the user doesn't know the exact path, search first
 - **MCP first, REST fallback** — prefer MCP tools; fall back to direct curl when they 404
 - **Self-signed cert** — Obsidian uses self-signed TLS. Use `-k` with curl

@@ -18,6 +18,6 @@ COPY server.py .
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -sf -H "Accept: text/event-stream" http://localhost:8081/mcp || exit 1
+    CMD curl -s --max-time 4 http://localhost:8081/mcp > /dev/null || exit 1
 
 CMD ["python", "server.py"]

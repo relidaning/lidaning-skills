@@ -4,7 +4,6 @@ set -euo pipefail
 SKILLS_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 REGISTRY="$SKILLS_DIR/registry.yaml"
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -45,7 +44,7 @@ installation_scope() {
   local name="$1"
   if [[ -d "$HOME/.claude/skills/$name" ]]; then
     echo "global"
-  elif [[ -d "$SKILLS_DIR/.claude/skills/$name" ]]; then
+  elif [[ -d "$PWD/.claude/skills/$name" ]]; then
     echo "project"
   else
     echo "none"
@@ -59,19 +58,15 @@ installation_scope() {
 cmd_list() {
   printf "${CYAN}lidaning-skills${NC}\n\n"
   while IFS= read -r name; do
-    local dir
+    local dir scope desc installed marker
     dir=$(skill_dir "$name")
-    local scope
     scope=$(skill_scope "$dir")
-    local desc
     desc=$(skill_desc "$dir")
-    local installed
     installed=$(installation_scope "$name")
-    local marker=""
     case "$installed" in
-      global) marker="${GREEN}[global]${NC}" ;;
-      project) marker="${YELLOW}[project]${NC}" ;;
-      none) marker="${DIM}[not installed]${NC}" ;;
+    global) marker="${GREEN}[global]${NC}" ;;
+    project) marker="${YELLOW}[project]${NC}" ;;
+    none) marker="${DIM}[not installed]${NC}" ;;
     esac
     printf "  %-22s %-8s %b  %b\n" "$name" "[$scope]" "$marker" "$desc"
   done < <(skill_names)
@@ -79,114 +74,76 @@ cmd_list() {
 }
 
 # ---------------------------------------------------------------------------
-# Interactive install (gum)
+# Interactive manage: unified add/remove via single checkbox UI
 # ---------------------------------------------------------------------------
 
-cmd_add() {
+cmd_manage() {
   if ! command -v gum &>/dev/null; then
-    echo -e "${YELLOW}gum not found — falling back to plain list.${NC}"
-    echo "Install gum for interactive checkboxes: https://github.com/charmbracelet/gum"
-    echo ""
+    printf "${YELLOW}gum not found — falling back to plain list.${NC}\n"
+    printf "Install gum: https://github.com/charmbracelet/gum\n\n"
     cmd_list
     exit 0
   fi
 
   local all_skills=()
-  local selected=()
+  local was_installed=()
+  local gum_args=(
+    choose --no-limit
+    --header="Toggle skills to install / remove  (space=toggle  enter=confirm  q=cancel)"
+    --cursor-prefix="[ ] "
+    --selected-prefix="[x] "
+    --unselected-prefix="[ ] "
+    --cursor.foreground="#06B6D4"
+    --selected.foreground="#06B6D4"
+    --header.foreground="#06B6D4"
+  )
+
   while IFS= read -r name; do
     all_skills+=("$name")
     if [[ "$(installation_scope "$name")" != "none" ]]; then
-      selected+=("$name")
+      was_installed+=("$name")
+      gum_args+=(--selected="$name")
     fi
   done < <(skill_names)
 
   if [[ ${#all_skills[@]} -eq 0 ]]; then
-    echo "No skills found in registry."
+    printf "No skills found in registry.\n"
     exit 1
   fi
-
-  # Build gum args: each --selected is a separate flag
-  local gum_args=(choose --no-limit --header="Select skills to add (space=toggle, enter=confirm)" \
-    --cursor-prefix="▏" --cursor.foreground="#FF6B6B" \
-    --selected-prefix="☑ " --unselected-prefix="☐ ")
-  for s in "${selected[@]}"; do
-    gum_args+=(--selected="$s")
-  done
-  for s in "${all_skills[@]}"; do
-    gum_args+=("$s")
-  done
 
   local chosen
   chosen=$(printf '%s\n' "${all_skills[@]}" | gum "${gum_args[@]}") || {
-    echo "Cancelled."
+    printf "Cancelled.\n"
     exit 0
   }
 
-  if [[ -z "$chosen" ]]; then
-    echo "Nothing selected."
-    exit 0
-  fi
-
-  echo ""
+  # Build lookup of chosen skills
+  declare -A chosen_set=()
   while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    local dir scope
-    dir=$(skill_dir "$name")
-    scope=$(skill_scope "$dir")
-    echo -e "${GREEN}[add]${NC} $name ($scope)"
-    "$SKILLS_DIR/install.sh" "$name"
-  done <<< "$chosen"
+    [[ -n "$name" ]] && chosen_set["$name"]=1
+  done <<<"$chosen"
 
-  echo ""
-  cmd_list
-}
+  local did_something=false
 
-# ---------------------------------------------------------------------------
-# Interactive uninstall (gum)
-# ---------------------------------------------------------------------------
-
-cmd_rm() {
-  if ! command -v gum &>/dev/null; then
-    echo -e "${RED}Error:${NC} 'gum' is required for interactive rm."
-    exit 1
-  fi
-
-  local installed_skills=()
-  while IFS= read -r name; do
-    if [[ "$(installation_scope "$name")" != "none" ]]; then
-      installed_skills+=("$name")
+  # Install newly selected
+  for name in "${all_skills[@]}"; do
+    if [[ -n "${chosen_set[$name]:-}" && "$(installation_scope "$name")" == "none" ]]; then
+      printf "${CYAN}[add]${NC} %s\n" "$name"
+      "$SKILLS_DIR/install.sh" "$name"
+      did_something=true
     fi
-  done < <(skill_names)
+  done
 
-  if [[ ${#installed_skills[@]} -eq 0 ]]; then
-    echo "No skills are currently installed."
-    exit 0
-  fi
+  # Remove newly deselected
+  for name in "${was_installed[@]}"; do
+    if [[ -z "${chosen_set[$name]:-}" ]]; then
+      printf "${YELLOW}[rm]${NC} %s\n" "$name"
+      "$SKILLS_DIR/install.sh" --remove "$name"
+      did_something=true
+    fi
+  done
 
-  local chosen
-  chosen=$(printf '%s\n' "${installed_skills[@]}" | gum choose --no-limit \
-    --header="Select skills to remove (space=toggle, enter=confirm)" \
-    --cursor-prefix="▏" --cursor.foreground="#FF6B6B" \
-    --selected-prefix="☑ " --unselected-prefix="☐ ") || {
-    echo "Cancelled."
-    exit 0
-  }
-
-  if [[ -z "$chosen" ]]; then
-    echo "Nothing selected."
-    exit 0
-  fi
-
-  echo ""
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    local dir scope
-    dir=$(skill_dir "$name")
-    scope=$(skill_scope "$dir")
-    echo -e "${YELLOW}[rm]${NC} $name"
-    "$SKILLS_DIR/install.sh" --remove "$name"
-  done <<< "$chosen"
-
+  $did_something || printf "No changes.\n"
   echo ""
   cmd_list
 }
@@ -196,22 +153,14 @@ cmd_rm() {
 # ---------------------------------------------------------------------------
 
 usage() {
-  cat <<EOF
-${CYAN}ldn${NC} — lidaning-skills manager
-
-  ${GREEN}ldn${NC}         Interactive checkbox UI to add/remove skills (gum)
-  ${GREEN}ldn list${NC}    Plain-text list with install status
-  ${GREEN}ldn add${NC}     Same as bare ldn
-  ${GREEN}ldn rm${NC}      Remove installed skills (gum)
-EOF
-  exit 0
+  printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
+  printf "  ${CYAN}ldn${NC}       Toggle skills on/off (checkbox UI)\n"
+  printf "  ${CYAN}ldn list${NC}  Plain-text list with install status\n"
 }
 
 case "${1:-}" in
-  list|ls)     cmd_list ;;
-  add|a)       cmd_add ;;
-  rm|remove)   cmd_rm ;;
-  -h|--help)   usage ;;
-  "")          cmd_add ;;  # bare ldn → checkbox UI
-  *)           usage ;;
+list | ls) cmd_list ;;
+-h | --help) usage ;;
+"") cmd_manage ;;
+*) usage ;;
 esac

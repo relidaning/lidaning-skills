@@ -75,6 +75,98 @@ list_skills() {
   done < "$REGISTRY"
 }
 
+# For project scope, MCP servers are defined in .mcp.json (committable) and
+# opted-in via enabledMcpjsonServers in settings.local.json (per-user).
+# For global scope, mcpServers in ~/.claude/settings.json is used directly.
+
+merge_mcp_config() {
+  local mcp_json="$1"
+  local scope="$2"
+  if [[ "$scope" == "global" ]]; then
+    local settings="$HOME/.claude/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    python3 - "$settings" "$mcp_json" <<'PYEOF'
+import json, sys, os
+settings_file, mcp_file = sys.argv[1], sys.argv[2]
+settings = json.load(open(settings_file)) if os.path.exists(settings_file) else {}
+mcp = json.load(open(mcp_file))
+settings.setdefault("mcpServers", {}).update(mcp)
+json.dump(settings, open(settings_file, "w"), indent=2)
+PYEOF
+  else
+    # Project scope: write server definitions to .mcp.json, enable in settings.local.json
+    local mcp_file=".mcp.json"
+    local local_settings=".claude/settings.local.json"
+    mkdir -p ".claude"
+    python3 - "$mcp_file" "$local_settings" "$mcp_json" <<'PYEOF'
+import json, sys, os
+mcp_file, local_settings_file, skill_mcp_file = sys.argv[1], sys.argv[2], sys.argv[3]
+skill_mcp = json.load(open(skill_mcp_file))
+# Merge into .mcp.json
+mcp = json.load(open(mcp_file)) if os.path.exists(mcp_file) else {"mcpServers": {}}
+mcp.setdefault("mcpServers", {}).update(skill_mcp)
+json.dump(mcp, open(mcp_file, "w"), indent=2)
+# Add server names to enabledMcpjsonServers in settings.local.json
+local_settings = json.load(open(local_settings_file)) if os.path.exists(local_settings_file) else {}
+enabled = local_settings.setdefault("enabledMcpjsonServers", [])
+for key in skill_mcp:
+    if key not in enabled:
+        enabled.append(key)
+json.dump(local_settings, open(local_settings_file, "w"), indent=2)
+PYEOF
+  fi
+}
+
+remove_mcp_config() {
+  local mcp_json="$1"
+  local scope="$2"
+  if [[ "$scope" == "global" ]]; then
+    local settings="$HOME/.claude/settings.json"
+    [[ -f "$settings" ]] || return 0
+    python3 - "$settings" "$mcp_json" <<'PYEOF'
+import json, sys, os
+settings_file, mcp_file = sys.argv[1], sys.argv[2]
+settings = json.load(open(settings_file))
+mcp = json.load(open(mcp_file))
+servers = settings.get("mcpServers", {})
+for key in mcp:
+    servers.pop(key, None)
+if servers:
+    settings["mcpServers"] = servers
+else:
+    settings.pop("mcpServers", None)
+json.dump(settings, open(settings_file, "w"), indent=2)
+PYEOF
+  else
+    local mcp_file=".mcp.json"
+    local local_settings=".claude/settings.local.json"
+    python3 - "$mcp_file" "$local_settings" "$mcp_json" <<'PYEOF'
+import json, sys, os
+mcp_file, local_settings_file, skill_mcp_file = sys.argv[1], sys.argv[2], sys.argv[3]
+skill_mcp = json.load(open(skill_mcp_file))
+# Remove from .mcp.json
+if os.path.exists(mcp_file):
+    mcp = json.load(open(mcp_file))
+    servers = mcp.get("mcpServers", {})
+    for key in skill_mcp:
+        servers.pop(key, None)
+    if servers:
+        mcp["mcpServers"] = servers
+    else:
+        mcp.pop("mcpServers", None)
+    json.dump(mcp, open(mcp_file, "w"), indent=2)
+# Remove from enabledMcpjsonServers in settings.local.json
+if os.path.exists(local_settings_file):
+    local_settings = json.load(open(local_settings_file))
+    enabled = local_settings.get("enabledMcpjsonServers", [])
+    local_settings["enabledMcpjsonServers"] = [k for k in enabled if k not in skill_mcp]
+    if not local_settings["enabledMcpjsonServers"]:
+        del local_settings["enabledMcpjsonServers"]
+    json.dump(local_settings, open(local_settings_file, "w"), indent=2)
+PYEOF
+  fi
+}
+
 install_skill() {
   local name="$1"
   local scope_override="${2:-}"
@@ -115,6 +207,12 @@ install_skill() {
   done
 
   log "Linked $name -> $link_dir/"
+
+  # Register MCP server if skill ships one
+  if [[ -f "$skill_dir/mcp.json" ]]; then
+    merge_mcp_config "$skill_dir/mcp.json" "$scope"
+    log "Registered MCP server(s) from $name"
+  fi
 }
 
 remove_skill() {
@@ -139,6 +237,12 @@ remove_skill() {
     log "Removed $link_dir"
   else
     warn "Not installed: $link_dir"
+  fi
+
+  # Deregister MCP server if skill ships one
+  if [[ -f "$skill_dir/mcp.json" ]]; then
+    remove_mcp_config "$skill_dir/mcp.json" "$scope"
+    log "Removed MCP server(s) from $name"
   fi
 }
 

@@ -20,6 +20,7 @@ services:
       - CHROMA_PORT=8000
       - OBSIDIAN_URL=http://127.0.0.1:27123
       - OBSIDIAN_TOKEN=${OBSIDIAN_MCP_TOKEN}
+      - TZ=Asia/Shanghai
     depends_on:
       chromadb:
         condition: service_healthy

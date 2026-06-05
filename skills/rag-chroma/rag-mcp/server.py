@@ -8,9 +8,20 @@ the index in sync automatically.
 
 import asyncio
 import hashlib
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    force=True,
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+_log = logging.getLogger(__name__)
 
 import httpx
 from chromadb import HttpClient
@@ -180,6 +191,7 @@ async def _sync_vault():
                 ]
                 collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
                 _vault_state[path] = sig
+                _log.info("re-indexed: %s (%d chunks)", path, len(chunks))
 
             except Exception:
                 continue
