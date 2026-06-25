@@ -40,15 +40,9 @@ skill_desc() {
   awk '/^description:/ {sub("^description: *",""); print; exit}' "$dir/metadata.yaml"
 }
 
-installation_scope() {
+is_installed_in_cwd() {
   local name="$1"
-  if [[ -d "$HOME/.claude/skills/$name" ]]; then
-    echo "global"
-  elif [[ -d "$PWD/.claude/skills/$name" ]]; then
-    echo "project"
-  else
-    echo "none"
-  fi
+  [[ -d "$PWD/.claude/skills/$name" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -58,19 +52,83 @@ installation_scope() {
 cmd_list() {
   printf "${CYAN}lidaning-skills${NC}\n\n"
   while IFS= read -r name; do
-    local dir scope desc installed marker
+    local dir scope desc marker
     dir=$(skill_dir "$name")
     scope=$(skill_scope "$dir")
     desc=$(skill_desc "$dir")
-    installed=$(installation_scope "$name")
-    case "$installed" in
-    global) marker="${GREEN}[global]${NC}" ;;
-    project) marker="${YELLOW}[project]${NC}" ;;
-    none) marker="${DIM}[not installed]${NC}" ;;
-    esac
+    if is_installed_in_cwd "$name"; then
+      marker="${GREEN}[installed]${NC}"
+    else
+      marker="${DIM}[not installed]${NC}"
+    fi
     printf "  %-22s %-8s %b  %b\n" "$name" "[$scope]" "$marker" "$desc"
   done < <(skill_names)
   echo ""
+}
+
+# ---------------------------------------------------------------------------
+# MCP inject: write skill mcp.json configs into cwd's .mcp.json + settings.local.json
+# ---------------------------------------------------------------------------
+
+# Returns a space-separated list of "name:mcp_json_path" for skills that ship mcp.json
+skills_with_mcp() {
+  while IFS= read -r name; do
+    local dir mcp
+    dir=$(skill_dir "$name")
+    mcp="$dir/mcp.json"
+    [[ -f "$mcp" ]] && printf '%s\n' "$name"
+  done < <(skill_names)
+}
+
+cmd_mcp_inject() {
+  python3 - "$SKILLS_DIR" <<'PYEOF'
+import json, sys, os, glob
+
+skills_dir = sys.argv[1]
+cwd = os.getcwd()
+mcp_file = os.path.join(cwd, ".mcp.json")
+local_settings_file = os.path.join(cwd, ".claude", "settings.local.json")
+
+# Collect all mcp.json files from skills
+skill_mcps = glob.glob(os.path.join(skills_dir, "skills", "*", "mcp.json"))
+if not skill_mcps:
+    print("[mcp] no skills ship mcp.json — nothing to inject.")
+    sys.exit(0)
+
+mcp = json.load(open(mcp_file)) if os.path.exists(mcp_file) else {"mcpServers": {}}
+mcp.setdefault("mcpServers", {})
+
+local_settings = json.load(open(local_settings_file)) if os.path.exists(local_settings_file) else {}
+enabled = local_settings.setdefault("enabledMcpjsonServers", [])
+
+added, updated = [], []
+for skill_mcp_path in sorted(skill_mcps):
+    servers = json.load(open(skill_mcp_path))
+    for key, cfg in servers.items():
+        if key not in mcp["mcpServers"]:
+            added.append(key)
+        elif mcp["mcpServers"][key] != cfg:
+            updated.append(key)
+        mcp["mcpServers"][key] = cfg
+        if key not in enabled:
+            enabled.append(key)
+
+os.makedirs(os.path.join(cwd, ".claude"), exist_ok=True)
+with open(mcp_file, "w") as f:
+    json.dump(mcp, f, indent=2)
+    f.write("\n")
+with open(local_settings_file, "w") as f:
+    json.dump(local_settings, f, indent=2)
+    f.write("\n")
+
+if added:
+    print(f"[mcp] .mcp.json: added {', '.join(added)}")
+if updated:
+    print(f"[mcp] .mcp.json: updated {', '.join(updated)}")
+if not added and not updated:
+    print("[mcp] .mcp.json: already up to date")
+print(f"[mcp] .claude/settings.local.json: enabledMcpjsonServers = {enabled}")
+PYEOF
 }
 
 # ---------------------------------------------------------------------------
@@ -87,9 +145,11 @@ cmd_manage() {
 
   local all_skills=()
   local was_installed=()
+  local MCP_ITEM="⟶ inject MCP servers into .mcp.json (cwd)"
+
   local gum_args=(
     choose --no-limit
-    --header="Toggle skills to install / remove  (space=toggle  enter=confirm  q=cancel)"
+    --header="Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
     --cursor-prefix="[ ] "
     --selected-prefix="[x] "
     --unselected-prefix="[ ] "
@@ -98,9 +158,11 @@ cmd_manage() {
     --header.foreground="#06B6D4"
   )
 
+  [[ -f "$PWD/.mcp.json" ]] && gum_args+=(--selected="$MCP_ITEM")
+
   while IFS= read -r name; do
     all_skills+=("$name")
-    if [[ "$(installation_scope "$name")" != "none" ]]; then
+    if is_installed_in_cwd "$name"; then
       was_installed+=("$name")
       gum_args+=(--selected="$name")
     fi
@@ -112,7 +174,7 @@ cmd_manage() {
   fi
 
   local chosen
-  chosen=$(printf '%s\n' "${all_skills[@]}" | gum "${gum_args[@]}") || {
+  chosen=$(printf '%s\n' "${all_skills[@]}" "$MCP_ITEM" | gum "${gum_args[@]}") || {
     printf "Cancelled.\n"
     exit 0
   }
@@ -125,23 +187,29 @@ cmd_manage() {
 
   local did_something=false
 
-  # Install newly selected
+  # Install newly selected (always into cwd's .claude/skills/)
   for name in "${all_skills[@]}"; do
-    if [[ -n "${chosen_set[$name]:-}" && "$(installation_scope "$name")" == "none" ]]; then
+    if [[ -n "${chosen_set[$name]:-}" ]] && ! is_installed_in_cwd "$name"; then
       printf "${CYAN}[add]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" "$name"
+      "$SKILLS_DIR/install.sh" "$name" --project
       did_something=true
     fi
   done
 
-  # Remove newly deselected
+  # Remove newly deselected (from cwd only)
   for name in "${was_installed[@]}"; do
     if [[ -z "${chosen_set[$name]:-}" ]]; then
       printf "${YELLOW}[rm]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" --remove "$name"
+      "$SKILLS_DIR/install.sh" --remove "$name" --project
       did_something=true
     fi
   done
+
+  # Inject MCP configs into cwd if that item was selected
+  if [[ -n "${chosen_set[$MCP_ITEM]:-}" ]]; then
+    cmd_mcp_inject
+    did_something=true
+  fi
 
   $did_something || printf "No changes.\n"
   echo ""
@@ -154,12 +222,19 @@ cmd_manage() {
 
 usage() {
   printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
-  printf "  ${CYAN}ldn${NC}       Toggle skills on/off (checkbox UI)\n"
-  printf "  ${CYAN}ldn list${NC}  Plain-text list with install status\n"
+  printf "  ${CYAN}ldn${NC}          Toggle skills on/off (checkbox UI)\n"
+  printf "  ${CYAN}ldn list${NC}     Plain-text list with install status\n"
+  printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into cwd's .mcp.json\n"
 }
 
 case "${1:-}" in
 list | ls) cmd_list ;;
+mcp)
+  case "${2:-}" in
+  inject) cmd_mcp_inject ;;
+  *) printf "Usage: ldn mcp inject\n" ;;
+  esac
+  ;;
 -h | --help) usage ;;
 "") cmd_manage ;;
 *) usage ;;

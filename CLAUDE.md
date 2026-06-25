@@ -41,3 +41,15 @@ The `coding-orchestrate` skill manages four files at repo root:
 - **README.md** — kept current with project concepts and features
 
 These are skill-managed, not hand-edited. When in doubt, invoke `/coding-orchestrate`.
+
+## Key Concepts
+
+**Skills are markdown, not executables** — a skill file instructs Claude but cannot self-execute on install. It cannot automatically write config files or start services when `install.sh` runs.
+
+**MCP server config lives in `settings.json`**, under the `mcpServers` key:
+- `~/.claude/settings.json` (global) — available in every project and session; right for general-purpose servers (RAG, Obsidian).
+- `.claude/settings.json` (project) — only that repo; extends/overrides global; right for repo-specific servers (e.g. a project database MCP).
+
+**To auto-wire an MCP server on skill install**, extend `install.sh` to write the `mcpServers` entry into the appropriate `settings.json` after symlinking the skill.
+
+**`update-config` skill** can edit `settings.json` interactively (permissions, hooks, env vars, `mcpServers`); invoke it when you need Claude to add or modify a config entry.
