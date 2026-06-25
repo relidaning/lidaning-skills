@@ -15,13 +15,21 @@ services:
   rag-mcp:
     build: ./rag-mcp
     network_mode: host
+    volumes:
+      - onnx-cache:/root/.cache/chroma
     environment:
       - CHROMA_HOST=localhost
       - CHROMA_PORT=8000
       - OBSIDIAN_URL=http://127.0.0.1:27123
       - OBSIDIAN_TOKEN=${OBSIDIAN_MCP_TOKEN}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL=${LLM_MODEL}
       - TZ=Asia/Shanghai
     depends_on:
       chromadb:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  onnx-cache:

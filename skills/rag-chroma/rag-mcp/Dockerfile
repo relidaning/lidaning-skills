@@ -10,8 +10,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download ONNX embedding model (~80MB) so first request doesn't time out
+# Soft-fail: if download times out, model is fetched on first container start instead
 COPY preload.py .
-RUN python preload.py
+RUN python preload.py || echo "Model preload skipped (will download at runtime)"
 
 COPY server.py .
 

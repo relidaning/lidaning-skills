@@ -27,6 +27,7 @@ import httpx
 from chromadb import HttpClient
 from chromadb.utils import embedding_functions
 from fastmcp import FastMCP
+from openai import AsyncOpenAI
 
 # ---------------------------------------------------------------------------
 # Config
@@ -42,6 +43,30 @@ WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL", "60"))
 COLLECTION_NAME = "documents"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
+
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")   # empty = OpenAI default
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+_llm: Optional[AsyncOpenAI] = None
+
+
+def get_llm() -> AsyncOpenAI:
+    global _llm
+    if _llm is None:
+        if not LLM_API_KEY:
+            raise RuntimeError("LLM_API_KEY env var is not set")
+        kwargs = {"api_key": LLM_API_KEY}
+        if LLM_BASE_URL:
+            kwargs["base_url"] = LLM_BASE_URL
+        _llm = AsyncOpenAI(**kwargs)
+    return _llm
+
+
+_ANSWER_SYSTEM = """\
+You are a helpful assistant. Answer the user's question using ONLY the numbered context passages below.
+If the context does not contain enough information, say so honestly — do not invent facts.
+After your answer include a "Sources:" line listing the document names you drew from."""
 
 # ---------------------------------------------------------------------------
 # Vault watcher state
@@ -357,6 +382,60 @@ async def rag_clear() -> dict:
     client.delete_collection(COLLECTION_NAME)
     _vault_state.clear()
     return {"cleared": count}
+
+
+@mcp.tool()
+async def rag_answer(query: str, k: int = 4) -> dict:
+    """Retrieve relevant chunks and generate a grounded answer with citations.
+
+    Args:
+        query: The question to answer.
+        k: Number of chunks to retrieve as context (default 4).
+
+    Returns dict with:
+        - answer: LLM response grounded in retrieved context, with a Sources section.
+        - sources: Deduplicated list of source document names used.
+        - chunks: The retrieved context passages with scores.
+    """
+    collection = get_collection()
+    results = collection.query(query_texts=[query], n_results=k)
+
+    ids = results.get("ids", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+    documents = results.get("documents", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+
+    if not ids:
+        return {"answer": "No relevant documents found in the index.", "sources": [], "chunks": []}
+
+    # Build numbered context block for the LLM
+    context_parts = []
+    chunks_info = []
+    for i, doc_id in enumerate(ids):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        text = documents[i] if i < len(documents) else ""
+        score = round(1 - distances[i], 4) if i < len(distances) else 0.0
+        source = meta.get("source", doc_id)
+        context_parts.append(f"[{i + 1}] (source: {source}, score: {score})\n{text}")
+        chunks_info.append({"id": doc_id, "source": source, "score": score})
+
+    context_block = "\n\n".join(context_parts)
+    user_message = f"Context:\n{context_block}\n\nQuestion: {query}"
+
+    response = await get_llm().chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": _ANSWER_SYSTEM},
+            {"role": "user", "content": user_message},
+        ],
+        temperature=0.2,
+    )
+    answer = response.choices[0].message.content
+
+    # Extract unique source names from chunks actually used
+    sources = list(dict.fromkeys(c["source"] for c in chunks_info))
+
+    return {"answer": answer, "sources": sources, "chunks": chunks_info}
 
 
 # ---------------------------------------------------------------------------
