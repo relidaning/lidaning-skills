@@ -1,10 +1,9 @@
 ---
 name: obsidian-local
 description: >
-  Local Obsidian vault access via the Obsidian Local REST API MCP server.
-  Search notes, read full content, create new notes, update/revise/patch
-  existing notes, and delete notes. Use when the user wants to find, read,
-  write, edit, or delete notes in their Obsidian vault.
+  Activate when user mentions Obsidian, vault, or notes, or asks to
+  search/read/write/edit/delete vault content. Primary interface to the
+  local Obsidian vault via MCP: read, write, patch, search, and delete.
 ---
 
 ## Overview

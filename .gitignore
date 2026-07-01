@@ -6,3 +6,4 @@ __pycache__/
 skills/*/data/
 skills/**/chroma_data/
 skills/**/chroma.log
+.env

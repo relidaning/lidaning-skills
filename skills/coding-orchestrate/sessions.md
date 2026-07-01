@@ -1,8 +1,12 @@
 # SESSION.md
 
-Records what happened in each coding session. The file lives at the project
-root as `SESSION.md`. Update it **before every exit** — when the user types
-`/exit` or the session ends.
+Records what happened in each coding session. The file lives at
+`.claude/SESSION.md` (under the project root). Update it **before every exit** —
+when the user types `/exit` or the session ends.
+
+> **Safety net:** the `SessionEnd` hook in `~/.claude/settings.json` runs a
+> headless Claude that also writes this file automatically, so the entry is
+> guaranteed even if the skill is not explicitly invoked at exit.
 
 ## Format
 

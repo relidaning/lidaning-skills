@@ -1,11 +1,9 @@
 ---
 name: coding-orchestrate
 description: >
-  Track coding session progress with TODO lists, session summaries, and
-  README maintenance. Also the recording layer — knows where every skill's
-  output should be persisted and handles the I/O. Use when the user starts a
-  new task, asks "what's next" or "where are we", makes a design decision,
-  wants a progress summary, or asks to update the README.
+  Activate at session start, when user asks "what's next"/"where are we", on
+  design decisions, before session end, or when updating .claude/SESSION.md/
+  .claude/TODO.md/.claude/MEMORIES.md/README.md. Recording layer for all skill output.
 ---
 
 ## Overview
@@ -19,16 +17,16 @@ It's the only skill that knows *where* things go. Other skills (like
 learning-instruct) generate content but don't know about file locations,
 the vault, or the I/O mechanism. This skill routes their output.
 
-### Orchestration files (project root)
+### Orchestration files
 
-- **[SESSION.md](sessions.md)** — 1–2 sentences per session.
+- **`.claude/SESSION.md`** ([format](sessions.md)) — 1–2 sentences per session.
   **Update before every exit.**
-- **[TODO.md](todos.md)** — things discovered during conversation that need
-  doing. Add as they surface.
-- **[MEMORIES.md](memories.md)** — things the user explicitly asked you to
-  remember. Add when they say "remember that…".
-- **[README.md](readme.md)** — key concepts, core features, and mechanisms
-  of the project. Keep it current.
+- **`.claude/TODO.md`** ([format](todos.md)) — things discovered during conversation
+  that need doing. Add as they surface.
+- **`.claude/MEMORIES.md`** ([format](memories.md)) — things the user explicitly
+  asked you to remember. Add when they say "remember that…".
+- **`README.md`** ([format](readme.md)) — key concepts, core features, and mechanisms
+  of the project. Keep it current. Lives at project root (standard convention).
 
 ### Recording layer
 
@@ -54,10 +52,10 @@ The vault path mapping:
 
 | File | When | Why |
 | ---- | ---- | --- |
-| SESSION.md | Before `/exit` or session end | 1–2 sentence summary of what happened |
-| TODO.md | As things are discovered in conversation | Never lose a task to chat scroll |
-| MEMORIES.md | When user says "remember that…" | Persist explicit user preferences |
-| README.md | When concepts, features, or mechanisms change | Onboard new readers in 5 minutes |
+| `.claude/SESSION.md` | Before `/exit` or session end | 1–2 sentence summary of what happened |
+| `.claude/TODO.md` | As things are discovered in conversation | Never lose a task to chat scroll |
+| `.claude/MEMORIES.md` | When user says "remember that…" | Persist explicit user preferences |
+| `README.md` | When concepts, features, or mechanisms change | Onboard new readers in 5 minutes |
 
 ## Recording rules
 

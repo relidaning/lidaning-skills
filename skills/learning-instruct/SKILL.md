@@ -1,13 +1,9 @@
 ---
 name: learning-instruct
 description: >
-  Structured learning tutor. Reads project context to infer what the user is
-  working on, assesses their level, then guides them through goal setting,
-  topic breakdown, step-by-step teaching, and mastery evaluation. Supports
-  /learning-instruct next/quiz/scenario for interactive hints, questions,
-  and real-world problems during teaching. Use when the user wants to learn
-  something new, asks for a study plan, wants to be tutored on a topic, or
-  invokes /learning-instruct.
+  Activate when user says "I want to learn X", "teach me X", "help me
+  understand X", "study plan for X", or invokes /learning-instruct.
+  Structured tutor: assess level → set goals → break topics → teach → evaluate.
 ---
 
 ## Overview

@@ -1,4 +1,4 @@
 name: english-practice
-description: Correct non-native English expressions in the user's messages.
+description: When user send a request In English, activate this skill.
 scope: project
 tags: [english, writing, communication, practice]

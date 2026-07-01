@@ -1,12 +1,21 @@
 ---
 name: model-switch
 description: >
-  Multi-provider LLM proxy for Claude Code. Route requests to DeepSeek, GLM, Kimi,
-  Anthropic, or OpenRouter. Switch models mid-session with /model provider/model-name.
-  Includes shell shortcuts for launching Claude with different backends.
+  Activate when user asks to switch models, use DeepSeek/GLM/Kimi/OpenRouter,
+  start or check the proxy, or invokes /model. Multi-provider LLM proxy: route
+  mid-session to any backend without restart.
 ---
 
 # Model Switch Proxy
+
+## When to activate
+
+Invoke this skill when:
+- User types `/model` or asks to switch to a different model
+- User mentions DeepSeek, GLM, Kimi, or OpenRouter by name
+- User asks to "use a different model", "switch to X", or "change model"
+- User wants to start, stop, or check the proxy status
+- User asks about multi-provider routing or model backends
 
 A local Hono proxy that sits between Claude Code and any Anthropic-compatible LLM
 provider. Switch models inside a running session without restarting.

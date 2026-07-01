@@ -1,10 +1,19 @@
 ---
 name: rag-chroma
 description: >
-  RAG pipeline backed by ChromaDB and ONNX embeddings, with Obsidian vault
-  integration. Load vault notes into the index, search by meaning, and keep
-  the index automatically in sync as notes are created, modified, or deleted.
+  Activate when user asks to search documents by meaning, ingest content
+  (PDFs/URLs/notes/Word/Excel), query the knowledge base, or manage the RAG
+  index. ChromaDB + ONNX semantic search pipeline with Obsidian vault sync.
 ---
+
+## When to activate
+
+Invoke this skill when:
+- User asks to search for information by meaning or semantic similarity
+- User wants to ingest content (PDF, URL, markdown, Word, Excel)
+- User asks "what do my documents say about X?" or similar
+- User wants to check RAG index status or remove documents
+- User wants to load Obsidian vault notes into the search index
 
 ## Overview
 
