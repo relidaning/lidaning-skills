@@ -1,0 +1,4 @@
+name: claude-maxer
+description: Hybrid cloud+local system that opens Claude Pro's 5-hour rolling usage window at fixed times daily and opportunistically runs real work when usage headroom allows.
+scope: project
+tags: [usage, quota, schedule, cron, pro-plan]

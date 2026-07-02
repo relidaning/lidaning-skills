@@ -11,3 +11,5 @@ skills:
     path: skills/rag-chroma
   - name: model-switch
     path: skills/model-switch
+  - name: claude-maxer
+    path: skills/claude-maxer

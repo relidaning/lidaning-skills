@@ -41,6 +41,8 @@ The `coding-orchestrate` skill manages four files. Three live under `.claude/` t
 
 These are skill-managed, not hand-edited. When in doubt, invoke `/coding-orchestrate`.
 
+Note: `.claude/` is gitignored, so these three files are local-only and not versioned — they can silently disappear (e.g. `TODO.md` was lost when moved under `.claude/` in commit 65d311e4 and later had to be rebuilt from `git show 65d311e4^:TODO.md`). If one goes missing, check git history from before the move.
+
 ## Key Concepts
 
 **Skills are markdown, not executables** — a skill file instructs Claude but cannot self-execute on install. It cannot automatically write config files or start services when `install.sh` runs.
@@ -66,7 +68,7 @@ CLAUDE.md and the `system-reminder` description should reinforce each other, not
 
 **Model reliability gap** — even when both CLAUDE.md and `system-reminder` signal activation, the model can silently skip calling `Skill(...)` on the first response. Mitigation: write descriptions as imperative commands ("Always activate for every user message") rather than conditional triggers ("When user sends X").
 
-**Skill optimization (SkillOpt loop)** — to improve trigger rates: score each skill on Trigger Clarity (0–5) + Body Quality (0–5); threshold ≥ 8/10; apply bounded edits (≤ 4/round), accept only if score improves. Run logs stored in Obsidian at `0_dev/AI/skill-opt/`. Last run: 2026-07-01, all 6 skills reached 9/10 from an average of 6.2/10 in one epoch.
+**Skill optimization (SkillOpt loop)** — to improve trigger rates: score each skill on Trigger Clarity (0–5) + Body Quality (0–5); threshold ≥ 8/10; apply bounded edits (≤ 4/round), accept only if score improves. Run logs stored in Obsidian at `0_dev/AI/skill-opt/`. Last run: 2026-07-02 (unattended claude-maxer audit), all 7 skills scored 10/10 — no edits needed; previous run 2026-07-01 raised all 6 skills from an average of 6.2/10 to 9/10 in one epoch.
 
 **MCP server config lives in `settings.json`**, under the `mcpServers` key:
 
