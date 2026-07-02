@@ -19,18 +19,20 @@ err()  { echo -e "${RED}[error]${NC} $*"; }
 
 usage() {
   cat <<EOF
-Usage: install.sh <skill-name...> [--global|--project] [--remove] [--list]
+Usage: install.sh <skill-name...> [--global|--project] [--remove] [--list] [--installed]
 
   --global      Install to ~/.claude/skills/ (personal, all projects)
   --project     Install to .claude/skills/ (this repo only)
   --remove      Uninstall the skill
   --list        List all available skills
+  --installed   Show install status of each skill (global/project)
 
 Examples:
   install.sh english-practice --global
   install.sh coding-orchestrate --project
   install.sh --remove english-practice --global
   install.sh --list
+  install.sh --installed
 EOF
   exit 0
 }
@@ -77,6 +79,23 @@ list_skills() {
       local scope=$(skill_scope "$skill_dir")
       local desc=$(meta_field "$skill_dir" "description" | trim)
       printf "  %-25s %-10s %s\n" "$name" "[$scope]" "$desc"
+    fi
+  done < "$REGISTRY"
+}
+
+list_installed() {
+  echo "Skill install status:"
+  echo ""
+  printf "  %-25s %-10s %-10s\n" "SKILL" "GLOBAL" "PROJECT"
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\ *-\ name: ]]; then
+      local name="${line#*: }"
+      read -r path_line
+      local global_status="-"
+      local project_status="-"
+      [[ -e "$GLOBAL_SKILLS/$name/SKILL.md" ]] && global_status="installed"
+      [[ -e "$PROJECT_SKILLS/$name/SKILL.md" ]] && project_status="installed"
+      printf "  %-25s %-10s %-10s\n" "$name" "$global_status" "$project_status"
     fi
   done < "$REGISTRY"
 }
@@ -264,6 +283,7 @@ while [[ $# -gt 0 ]]; do
     --project)  SCOPE="project"; shift ;;
     --remove)   REMOVE=true; shift ;;
     --list)     list_skills; exit 0 ;;
+    --installed) list_installed; exit 0 ;;
     -h|--help)  usage ;;
     *)          SKILLS+=("$1"); shift ;;
   esac
