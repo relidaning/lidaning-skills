@@ -40,6 +40,12 @@ skill_path() {
   grep -A1 "name: $name$" "$REGISTRY" | grep 'path:' | sed 's/.*path: //'
 }
 
+trim() {
+  # Trims leading/trailing whitespace without xargs, which chokes on
+  # unmatched quotes (e.g. an apostrophe in a description field).
+  awk '{$1=$1};1'
+}
+
 meta_field() {
   local skill_dir="$1"
   local field="$2"
@@ -52,12 +58,12 @@ meta_field() {
     in_fold && /^  /     { sub("^  ", ""); printf "%s ", $0 }
     in_fold && /^[^ ]/  { exit }
     END { if (in_fold) printf "\n" }
-  ' "$skill_dir/metadata.yaml" | xargs
+  ' "$skill_dir/metadata.yaml" | trim
 }
 
 skill_scope() {
   local skill_dir="$1"
-  meta_field "$skill_dir" "scope" | xargs
+  meta_field "$skill_dir" "scope" | trim
 }
 
 list_skills() {
@@ -69,7 +75,7 @@ list_skills() {
       read -r path_line
       local skill_dir="$SKILLS_DIR/${path_line#*: }"
       local scope=$(skill_scope "$skill_dir")
-      local desc=$(meta_field "$skill_dir" "description" | xargs)
+      local desc=$(meta_field "$skill_dir" "description" | trim)
       printf "  %-25s %-10s %s\n" "$name" "[$scope]" "$desc"
     fi
   done < "$REGISTRY"
