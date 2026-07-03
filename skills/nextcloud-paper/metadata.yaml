@@ -1,0 +1,9 @@
+name: nextcloud-paper
+description: Operate the self-hosted Nextcloud via MCP (WebDAV). List, read, write, move, copy, delete, and search files.
+scope: project
+tags:
+  - nextcloud
+  - files
+  - webdav
+  - mcp
+  - self-hosted

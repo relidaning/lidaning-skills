@@ -1,0 +1,4 @@
+# Sessions
+
+## 2026-07-03 — Headless usage fetch via OAuth endpoint (Playwright fallback + vault heartbeat)
+Built `fetch_usage_oauth.py`: discovered that `GET api.anthropic.com/api/oauth/usage` (Bearer token from `~/.claude/.credentials.json` + `anthropic-beta: oauth-2025-04-20`) returns 5h/7d utilization headlessly — overturning the prior "only the interactive statusline sees rate_limits" belief — and made it fully unattended by having the script refresh the ~8h OAuth token itself (single-use refreshToken, atomic write-back). Wired it into `run_maxer_work.sh` and a 15-min crontab entry, added a `--vault-log` heartbeat that appends each fetch to a daily Obsidian note (`0_dev/AI/claude-maxer/usage-log-YYYY-MM-DD.md`, non-fatal if the vault is offline, localhost proxy bypassed); the originally requested Playwright scraper (`fetch_usage_web.py`) is kept only as a fallback since Cloudflare's human check blocks claude.ai login.

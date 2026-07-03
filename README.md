@@ -13,6 +13,8 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | `model-switch` | project | Route Claude Code requests to DeepSeek, GLM, Kimi, or OpenRouter. |
 | `obsidian-local` | project | Local Obsidian vault via REST API MCP — search, read, create, update notes. |
 | `rag-chroma` | project | General-purpose RAG: ingest docs/URLs/PDFs, embed, store, retrieve. |
+| `claude-maxer` | project | Documents/manages the keep-alive pings + opportunistic-work loop for Pro/Max limits. |
+| `nextcloud-paper` | project | Operate the self-hosted Nextcloud via MCP (WebDAV): list, read, write, move, search files. |
 
 ## Quick start
 

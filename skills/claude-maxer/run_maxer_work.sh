@@ -4,12 +4,15 @@
 # cached usage gate before each one — until usage says skip, or a safety
 # valve trips.
 #
-# Real per-iteration 5h/7d usage % is NOT observable here: that data only
-# ever comes from the interactive statusLine hook (see statusline.py), which
-# never fires in headless `claude -p` mode. So the cached snapshot stays
-# frozen for the whole loop unless something else (an interactive session)
-# updates it concurrently. The loop still re-checks it every iteration in
-# case that happens, but the real backstops are the safety valves below.
+# Usage observability: fetch_usage_oauth.py (api.anthropic.com/api/oauth/
+# usage with the Claude Code OAuth token) refreshes the usage snapshot
+# before each iteration's gate check, so the loop CAN see its own
+# consumption. The token rotates automatically whenever `claude` runs —
+# including this loop's own `claude -p` calls — so it stays fresh in
+# practice. If the fetch fails anyway (expired token, network), the loop
+# falls back to the old behavior: the snapshot stays frozen at whatever the
+# last interactive statusLine render cached, and the safety valves below
+# are the real backstop.
 #
 # Usage: run_maxer_work.sh [--dry-run]
 
@@ -99,6 +102,15 @@ while true; do
     log "stopped" "none" "wall-clock cap reached (${MAX_MINUTES}m)"
     break
   fi
+
+  # Best-effort snapshot refresh from the OAuth usage endpoint (exit 2 =
+  # token expired — any `claude` run refreshes it; anything nonzero = keep
+  # the cached statusline snapshot).
+  set +e
+  FETCH_OUTPUT="$(timeout 60 python3 "$SKILL_DIR/fetch_usage_oauth.py" 2>&1 | tail -1)"
+  FETCH_STATUS=$?
+  set -e
+  echo "[iter $ITER] usage-fetch exit=$FETCH_STATUS: $FETCH_OUTPUT"
 
   set +e
   CHECK_OUTPUT="$(python3 "$SKILL_DIR/check_usage.py")"

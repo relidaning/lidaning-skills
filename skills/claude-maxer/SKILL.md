@@ -18,16 +18,17 @@ ping.
 
 The cloud routine (claude.ai scheduled routines / `RemoteTrigger`) is
 reliable regardless of whether this machine is on, but runs in an isolated
-sandbox with **no access to real usage numbers** — there is no tool or API
-that exposes a Claude Pro/Max account's actual 5h/7d usage percentage to a
-running session, cloud or local.
+sandbox without this machine's credential file, so it can't check usage
+before deciding to work.
 
-The only place that number genuinely exists is the `rate_limits` object the
-Claude Code harness passes to the **statusLine hook** on every render during
-an interactive session on this machine — and it's not persisted anywhere by
-default. So the usage-aware part of this system has to run locally, where
-that data is available; the pure window-opening ping can safely stay in the
-cloud.
+Locally there are two sources for real usage numbers, both feeding
+`~/.claude/state/usage_snapshot.json`: the **OAuth usage endpoint**
+(component 2b — primary; works headlessly, no browser or login), and the
+`rate_limits` object the Claude Code harness passes to the **statusLine
+hook** on every render during an interactive session (passive fallback,
+only fresh while you're actively using Claude Code). So the usage-aware
+part of this system runs locally; the pure window-opening ping can safely
+stay in the cloud.
 
 ## Components
 
@@ -49,6 +50,59 @@ cloud.
 `cached_at` timestamp). This is a passive side effect of normal interactive
 use — no daemon, nothing runs when the machine is idle/off. Consequence: the
 snapshot is only as fresh as your last interactive session.
+
+### 2b. OAuth usage fetcher (headless-safe refresh, primary source)
+
+`skills/claude-maxer/fetch_usage_oauth.py` closes the "snapshot only
+refreshes during interactive sessions" gap: it GETs
+`https://api.anthropic.com/api/oauth/usage` — the same endpoint the CLI's
+`/usage` screen uses — authenticating with the Claude Code OAuth
+`accessToken` from `~/.claude/.credentials.json` (header
+`anthropic-beta: oauth-2025-04-20`). The response carries `five_hour` and
+`seven_day` `utilization` + ISO `resets_at`, plus model-scoped weekly
+limits (e.g. a per-model Fable cap). It writes the 5h/7d numbers into the
+same `usage_snapshot.json` (tagged `"source": "oauth-api"`, scoped limits
+under `scoped_limits`), so `check_usage.py` needs no changes.
+
+- **No setup, no browser.** Discovered 2026-07-03; this replaced a
+  Playwright scraper of claude.ai/new#settings/usage
+  (`fetch_usage_web.py`, kept in the repo as a fallback) whose login flow
+  Cloudflare's human-verification blocked.
+- **Token freshness — fully self-sufficient:** access tokens live ~8h; the
+  script refreshes an expired (or `--refresh`-forced) token itself via the
+  same OAuth flow the CLI uses (`console.anthropic.com/v1/oauth/token`,
+  Claude Code's public client_id) and atomically writes the rotated
+  access+refresh tokens back to `~/.claude/.credentials.json` (0600) — the
+  refresh token is single-use, so persisting the new one immediately is
+  what keeps the CLI's own auth working too. A 401/403 mid-fetch triggers
+  one refresh-and-retry. No interactive session is ever needed. Exit 0 =
+  snapshot written, exit 2 = auth problem (refresh itself rejected —
+  re-login with `claude` needed), exit 1 = other failure. On nonzero exit
+  the cached snapshot is left untouched.
+- **Background refresh:** a crontab entry runs it every 15 minutes
+  (`*/15 * * * * HOME=/home/shake /usr/bin/python3 …/fetch_usage_oauth.py
+  --vault-log > /tmp/claude-maxer-usage-fetch.log 2>&1`), so the snapshot
+  stays fresh with zero interaction — the machine's other cron jobs can
+  trust it. Verified to work under cron's stripped env (`env -i HOME=…`):
+  the script defaults the proxy internally and needs only `HOME`. Querying
+  the usage endpoint is metadata-only — it does not consume quota or open
+  the 5h window.
+- **Vault heartbeat (`--vault-log`):** each fetch appends one line
+  (`- HH:MM — 5h X% (resets …) · 7d Y% (…) · Fable 7d Z%`) to a daily note
+  at `0_dev/AI/claude-maxer/usage-log-YYYY-MM-DD.md` via Obsidian's Local
+  REST API — a human-visible proof the loop is alive, and a usage history
+  over the day. It talks to `127.0.0.1:27123` directly (proxy bypassed),
+  reading the token from `$OBSIDIAN_MCP_TOKEN` or parsing
+  `~/.zshrc.local` under cron. Vault errors (Obsidian closed, plugin off)
+  only print a `WARN` — the snapshot fetch still succeeds.
+- **Proxy:** uses `$https_proxy`/`$http_proxy`, defaulting to
+  `http://127.0.0.1:10808` (same xray requirement as `claude -p`).
+- **Debugging:** `--raw` dumps the full API response; `--no-write` prints
+  the parsed result without touching the snapshot.
+
+`run_maxer_work.sh` calls this (best-effort, 60s timeout) before every
+iteration's gate check, so the loop sees its own consumption instead of a
+frozen snapshot.
 
 ### 3. Usage gate
 
@@ -96,16 +150,15 @@ before the next window-opening ping fires:
 - `MAX_MINUTES` (50) elapsed — leaves headroom before the next cron fire,
   which is ~5h later
 
-**Important caveat:** real per-iteration usage % is not observable here.
-`claude -p` (any `--output-format`) never includes `rate_limits` in its
-output — that field only exists in the interactive statusLine hook payload
-(confirmed by testing `--output-format json` directly), which never fires in
-headless/print mode. So across a whole loop, the usage gate is really only
-checking whatever the last *interactive* session on this machine last saw,
-not what the loop itself has been consuming. The iteration/wall-clock caps
-exist because of this — without them the loop would have no real stop
-condition short of an actual interactive session pushing the cached % over
-95%.
+**Important caveat (now mitigated):** `claude -p` (any `--output-format`)
+never includes `rate_limits` in its output — that field only exists in the
+interactive statusLine hook payload, which never fires in headless/print
+mode. Originally that meant the loop could never see its own consumption.
+The OAuth usage fetcher (component 2b) fixes this: each iteration refreshes
+the snapshot straight from the usage API before the gate check. If the
+fetch fails (expired token, network), the loop silently degrades to the old
+frozen-snapshot behavior, which is why the iteration/wall-clock caps stay
+in place as the backstop.
 
 This only fires opportunistically — if the machine is off or asleep at a
 slot, that slot's work silently doesn't happen (the cloud ping still opens
@@ -175,8 +228,15 @@ need no PR.
 
 - Live routine: `schedule` skill, or https://claude.ai/code/routines
   (deletion also goes through that URL — can't delete via API)
-- Local cron: `crontab -l` / `crontab -e`
+- Local cron: `crontab -l` / `crontab -e` (work loop — currently disabled —
+  plus the 15-min usage-snapshot refresh; its last run's output is in
+  `/tmp/claude-maxer-usage-fetch.log`)
 - Run history: `~/.claude/state/claude-maxer.log.jsonl`
 - Last headless run's full output: `/tmp/claude-maxer-last-run.log`
 - Test the gate/work-selection without actually running work:
   `skills/claude-maxer/run_maxer_work.sh --dry-run`
+- Check current usage on demand:
+  `python3 skills/claude-maxer/fetch_usage_oauth.py` (add `--no-write` to
+  just look, `--raw` for the full API response). The Playwright fallback
+  (`fetch_usage_web.py`) needs a one-time `--login` that Cloudflare's human
+  check currently blocks — only reach for it if the OAuth endpoint dies.

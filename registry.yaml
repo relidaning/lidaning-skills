@@ -13,3 +13,7 @@ skills:
     path: skills/model-switch
   - name: claude-maxer
     path: skills/claude-maxer
+  - name: nextcloud-paper
+    path: skills/nextcloud-paper
+  - name: paper
+    path: skills/paper
