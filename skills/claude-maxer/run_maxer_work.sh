@@ -15,17 +15,36 @@
 
 set -euo pipefail
 
+# cron on this box doesn't set $HOME at all. Must be set before PATH below,
+# which also depends on $HOME.
+export HOME="/home/shake"
+
 # cron runs with a minimal PATH (just /usr/bin:/bin etc.) that doesn't
 # include claude, git, gh, npm, or node — all of which the headless session
 # needs (claude itself, plus git/gh/npm as tools it shells out to for the
 # branch+PR/dep-audit work). Prepend the same dirs the interactive shell uses.
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.nvm/versions/node/v24.15.0/bin:$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
+# Root cause of every real cron failure so far ("403 Failed to authenticate"):
+# this network reaches api.anthropic.com only via a local proxy
+# (v2rayN/xray listening on 127.0.0.1:10808 — confirmed with `ss -tlnp`), set
+# via http_proxy/https_proxy in the interactive shell's env. Cron doesn't
+# inherit shell env at all, so requests went out unproxied and got a 403
+# instead of a network error. Reproduced by clearing env entirely
+# (`env -i ... claude -p`) — identical error; adding these two vars back
+# fixed it. If the proxy client/port ever changes, update this.
+export http_proxy="http://127.0.0.1:10808"
+export https_proxy="http://127.0.0.1:10808"
+
 REPO_DIR="/data/apps/lidaning-skills"
 SKILL_DIR="$REPO_DIR/skills/claude-maxer"
 LOG_FILE="$HOME/.claude/state/claude-maxer.log.jsonl"
 DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
+
+# Truncate once per whole loop run (not per iteration — each iteration below
+# appends, so this file covers every iteration of the current run only).
+: > /tmp/claude-maxer-last-run.log
 
 # Safety valves — real usage % can't be observed per-iteration (see above),
 # so these bound the loop instead of a token/cost figure. Next cron fire is
@@ -57,10 +76,13 @@ build_prompt() {
     papers-digest)
       echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://huggingface.co/papers/trending, pick 2-3 trending papers not already covered in a note from earlier today, and for each fetch its abstract/summary content (via WebFetch on the paper page — do not attempt to download raw PDFs). Write a concise summary (what problem it solves, key idea, why it is notable) for each paper. Use the obsidian-local skill to create one note in the vault under a papers/digest folder consistent with this vault'"'"'s existing conventions (look at how skill-opt logs are organized under 0_dev/AI/ for the pattern), dated today, containing the summaries and links back to the paper pages. This does not touch the git repo, so no branch or PR is needed.'
       ;;
+    news-digest)
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://hacker-news.firebaseio.com/v0/topstories.json, take the first 10 story ids, fetch each via https://hacker-news.firebaseio.com/v0/item/{id}.json, and pick the 3 most interesting ones by score/discussion volume that are not already covered in a note from earlier today. For each: fetch the linked article via WebFetch (skip Ask HN/Show HN self-posts with no external link, or fall back to just the HN discussion) and write a concise summary (what it is, why it is notable, key discussion point from the top comments if relevant). Use the obsidian-local skill to create one note in the vault under a news/digest folder consistent with this vault'"'"'s existing conventions (look at how papers/digest notes are organized for the pattern), dated today, containing the summaries and links back to both the article and the HN discussion thread. This does not touch the git repo, so no branch or PR is needed.'
+      ;;
   esac
 }
 
-TYPES=(skill-audit todo-triage dep-audit papers-digest)
+TYPES=(skill-audit todo-triage dep-audit papers-digest news-digest)
 START_TS=$(date +%s)
 ITER=0
 TOTAL_COST="0"
@@ -101,8 +123,9 @@ while true; do
 
   cd "$REPO_DIR"
   OUT_FILE="/tmp/claude-maxer-last-run.log"
+  echo "=== iter $ITER ($WORK_TYPE) $(date -Iseconds) ===" >> "$OUT_FILE"
   set +e
-  RESULT_JSON="$(claude -p "$PROMPT" --model claude-sonnet-5 --output-format json --max-budget-usd 3 --dangerously-skip-permissions 2>"$OUT_FILE")"
+  RESULT_JSON="$(claude -p "$PROMPT" --model claude-sonnet-5 --output-format json --max-budget-usd 3 --dangerously-skip-permissions 2>>"$OUT_FILE")"
   CALL_STATUS=$?
   set -e
   echo "$RESULT_JSON" >> "$OUT_FILE"

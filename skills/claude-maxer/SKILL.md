@@ -120,7 +120,26 @@ prepends those dirs to `PATH` at the top of the script — if any of those
 tools get reinstalled to a different path (e.g. a node version bump changes
 the nvm path), update that `export PATH=...` line.
 
-## The 4 work types
+**Cron proxy gotcha:** this machine only reaches `api.anthropic.com` through
+a local proxy — v2rayN/xray listening on `127.0.0.1:10808` (check with
+`ss -tlnp | grep 10808`), exported as `http_proxy`/`https_proxy` in the
+interactive shell. Cron inherits none of the interactive shell's env, so
+`claude -p` went out unproxied and the API returned `403 Failed to
+authenticate` — indistinguishable from a real auth failure without digging
+in (reproduced by running `env -i claude -p ...`, which hit the identical
+error; adding the two proxy vars back fixed it). Also inherited the same
+missing-env symptom: `HOME` was unset too, which breaks credential file
+lookup (`~/.claude/.credentials.json` resolves to `/.claude/...`) — cron on
+this box sets neither `HOME` nor a proxy. `run_maxer_work.sh` now explicitly
+exports `HOME` and both proxy vars at the top, before the `PATH` fix. If the
+proxy client/port ever changes, update those two `export` lines. Every
+cron-fired iteration before this fix failed silently this way (8/8 failures
+in one run, logged as `"status": "failed"` in `claude-maxer.log.jsonl` with
+no real work done) — the loop's cost/iteration accounting still looked
+fine (`$0` spent) because auth failures don't reach the API metering, so
+this class of failure produces no cost signal to notice it by.
+
+## The 5 work types
 
 Each prompt tells the headless agent it's running unattended and to stay
 within scope:
@@ -136,12 +155,21 @@ within scope:
 - **papers-digest** — pull trending papers from
   https://huggingface.co/papers/trending, summarize 2-3 via WebFetch, write
   a note to the Obsidian vault via the `obsidian-local` skill.
+- **news-digest** — pull the top 10 Hacker News front-page stories via its
+  public API (`hacker-news.firebaseio.com`), pick the 3 most interesting by
+  score/discussion, summarize via WebFetch, write a note to the Obsidian
+  vault. Source choice: HN was picked as the default over Reddit/lobste.rs/
+  GitHub Trending because it needs no auth, has a stable public API, and is
+  the standard broad-coverage source for "what's interesting in tech today."
+  If that turns out to be the wrong fit, swap the source in the
+  `news-digest` case of `build_prompt()` in `run_maxer_work.sh`.
 
 **Safety gate:** skill-audit, todo-triage, and dep-audit all work on a new
 `claude-maxer/<type>-<timestamp>-i<iteration>` branch and open a **draft
 PR** — never push to master directly. The iteration suffix keeps branch
 names unique when the same type recurs within one loop run. papers-digest
-only writes to the Obsidian vault, not the repo, so it needs no PR.
+and news-digest only write to the Obsidian vault, not the repo, so they
+need no PR.
 
 ## Inspecting / adjusting
 
