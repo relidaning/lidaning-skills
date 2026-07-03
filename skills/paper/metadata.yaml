@@ -1,5 +1,5 @@
 name: paper
-description: Search and download AI/ML research papers from arXiv, Hugging Face papers, and Semantic Scholar. PDFs land in ~/papers/.
+description: Search and download AI/ML research papers from arXiv, Hugging Face papers, and Semantic Scholar. PDFs land in ~/papers/ and are stored in Nextcloud papers/.
 scope: project
 tags:
   - papers

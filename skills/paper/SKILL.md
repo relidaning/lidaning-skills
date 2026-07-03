@@ -4,7 +4,8 @@ description: >
   Activate when user asks to search, find, fetch, or download AI/ML/DL research
   papers, mentions arXiv, Hugging Face papers, Semantic Scholar, or gives an
   arXiv ID, paper title, or paper URL. Searches arXiv, HF papers, and Semantic
-  Scholar via their public APIs and downloads PDFs to ~/papers/.
+  Scholar via their public APIs, downloads PDFs to ~/papers/, and stores them
+  in Nextcloud papers/.
 ---
 
 ## Overview
@@ -16,7 +17,9 @@ open-access PDFs for non-arXiv venues). All via public APIs with `curl` — no
 keys, no MCP server.
 
 Downloads go to `~/papers/` (create it if missing), named
-`<arxiv-id> - <title>.pdf` (sanitize `/`, `:`, `?` out of titles).
+`<arxiv-id> - <title>.pdf` (sanitize `/`, `:`, `?` out of titles), and are
+then uploaded to Nextcloud `papers/` (see "Store in Nextcloud" below) — the
+local copy stays as a cache.
 
 ## Sources
 
@@ -102,16 +105,38 @@ curl -s "https://api.semanticscholar.org/graph/v1/paper/arXiv:2312.00752?fields=
 4. Verify: `file` must say PDF and size must be plausible (>10 KB). arXiv
    sometimes serves an HTML error page with HTTP 200 — a tiny or non-PDF file
    means the download failed; report it, don't leave the bad file behind.
+5. Upload the verified PDF to Nextcloud `papers/` (next section). If Nextcloud
+   is unreachable, keep the local copy, tell the user the upload failed, and
+   don't retry endlessly.
 
 ### "What's new / trending this week?"
 
 HF `daily_papers` for today and recent dates; dedupe, present upvotes + titles.
 
-### Save to Nextcloud
+### Store in Nextcloud (standard step after every download)
 
-If the user asks to put a paper in their cloud storage, the `nextcloud`
-skill's allowed scope already includes `papers/` — download locally first,
-then upload via that skill (curl `-T` for PDFs, not MCP write).
+Every verified download is uploaded to Nextcloud `papers/` — the one
+directory the `nextcloud-paper` skill's allowlist permits. Use curl WebDAV
+directly (not MCP write — PDFs are too big to pipe through context):
+
+```bash
+source ~/.zshrc.local   # NEXTCLOUD_HOST / _USERNAME / _PASSWORD (app password)
+f="1706.03762 - Attention Is All You Need.pdf"
+enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$f")
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
+  -T ~/papers/"$f" \
+  "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/papers/$enc" \
+  -w "%{http_code}\n"
+```
+
+- **201** = created, **204** = overwrote an existing file; anything else is a
+  failure — report it.
+- **`--noproxy '*'` is mandatory** — this machine's global `http_proxy`
+  points at the xray proxy and `no_proxy` is empty, so without it requests to
+  `127.0.0.1:8080` get routed into the proxy and fail.
+- **URL-encode the filename** (spaces, `&`, …) as shown; curl does not encode
+  `-T` target URLs for you.
+- Skip the upload only if the user explicitly says local-only.
 
 ## Rules
 

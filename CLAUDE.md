@@ -22,7 +22,7 @@ These skills auto-invoke — you don't need `/slash` commands:
 | `rag-chroma`         | project | General-purpose RAG. Ingest documents (md, URLs, PDFs, Excel, Word), embed, store. Agent decides when to retrieve. Requires `docker compose -f skills/rag-chroma/docker-compose.yml up -d`. |
 | `claude-maxer`       | project | Questions about Pro/Max usage limits, the 5h rolling window, weekly quota, or "claude-maxer". Documents/manages the keep-alive pings + opportunistic-work cron loop.                        |
 | `nextcloud-paper`    | project | Mentions of Nextcloud, or list/read/upload/download/move/copy/delete/search files in the self-hosted cloud storage. WebDAV via MCP (`nc_webdav_*`), curl fallback.                          |
-| `paper`              | project | Search/fetch/download AI/ML papers; mentions of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID/URL, or a paper title. Public APIs via curl; PDFs land in `~/papers/`.            |
+| `paper`              | project | Search/fetch/download AI/ML papers; mentions of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID/URL, or a paper title. Public APIs via curl; PDFs land in `~/papers/` and are uploaded to Nextcloud `papers/`.  |
 
 ## Adding a skill
 
@@ -107,3 +107,5 @@ CLAUDE.md and the `system-reminder` description should reinforce each other, not
 **Installed SKILL.md files are symlinks** — `install.sh` symlinks the repo's skill directory, not copies. Editing `skills/<name>/SKILL.md` in the repo takes effect immediately in the installed skill; no re-install needed. Confirmed: `~/.claude/skills/<name>` and `.claude/skills/<name>` both resolve back to the repo path.
 
 **The harness can silently swap the model mid-session** — when Fable 5's safeguards flag a reply, Claude Code retries it on Opus 4.8 (a `model_refusal_fallback` event in the transcript) without any user action. The statusline is then the reliable indicator: `statusline.py` renders `payload.model.display_name` straight from the harness, which tracks the actual serving model, while the model's injected self-ID string can stay stale at "Fable 5". Confirmed 2026-07-03 when the statusline showed Opus 4.8 mid-conversation and the assistant wrongly insisted nothing had switched.
+
+**`git mv` fails on a never-committed skill directory** — `git mv skills/<name> skills/<new-name>` errors with "source directory is empty" if `skills/<name>` has no tracked files yet (git has nothing to move), even though the directory clearly has content on disk. Fall back to plain `mv` plus manual `git add` of the new path. Confirmed 2026-07-03 renaming `nextcloud` → `nextcloud-paper` before its first commit; also remember to fix the installed symlink under `.claude/skills/<name>/SKILL.md`, which still points at the old path after a manual `mv` and won't resolve until repointed.
