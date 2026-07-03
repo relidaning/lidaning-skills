@@ -22,7 +22,7 @@ These skills auto-invoke — you don't need `/slash` commands:
 | `rag-chroma`         | project | General-purpose RAG. Ingest documents (md, URLs, PDFs, Excel, Word), embed, store. Agent decides when to retrieve. Requires `docker compose -f skills/rag-chroma/docker-compose.yml up -d`. |
 | `claude-maxer`       | project | Questions about Pro/Max usage limits, the 5h rolling window, weekly quota, or "claude-maxer". Documents/manages the keep-alive pings + opportunistic-work cron loop.                        |
 | `nextcloud-paper`    | project | Mentions of Nextcloud, or list/read/upload/download/move/copy/delete/search files in the self-hosted cloud storage. WebDAV via MCP (`nc_webdav_*`), curl fallback.                          |
-| `paper`              | project | Search/fetch/download AI/ML papers; mentions of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID/URL, or a paper title. Public APIs via curl; PDFs land in `~/papers/` and are uploaded to Nextcloud `papers/`.  |
+| `paper`              | project | **Any talk of research papers** — "is there a paper about X?", discussing a paper, search/fetch/read/download; mentions of arXiv, HF papers, Semantic Scholar, an arXiv ID/URL, or a paper title. Search presents hits + offers download; PDFs land in `~/papers/` and are uploaded to Nextcloud `papers/`.  |
 
 ## Adding a skill
 

@@ -1,11 +1,13 @@
 ---
 name: paper
 description: >
-  Activate when user asks to search, find, fetch, or download AI/ML/DL research
-  papers, mentions arXiv, Hugging Face papers, Semantic Scholar, or gives an
-  arXiv ID, paper title, or paper URL. Searches arXiv, HF papers, and Semantic
-  Scholar via their public APIs, downloads PDFs to ~/papers/, and stores them
-  in Nextcloud papers/.
+  Activate whenever research papers come up in the conversation — asking
+  whether a paper exists, discussing a paper or model report, or asking to
+  search, find, fetch, read, or download AI/ML/DL papers; also on any mention
+  of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID, paper title,
+  or paper URL. Searches arXiv, HF papers, and Semantic Scholar via their
+  public APIs, downloads PDFs to ~/papers/, and stores them in Nextcloud
+  papers/.
 ---
 
 ## Overview
@@ -87,6 +89,13 @@ curl -s "https://api.semanticscholar.org/graph/v1/paper/arXiv:2312.00752?fields=
 
 ## Workflows
 
+### Search vs download
+
+"Is there a paper about X?" / "what's new?" = **search**: run the queries,
+present hits, and end by offering to download. Fetch PDFs only when the user
+asks for a download (or accepts the offer) — never auto-download every
+search hit.
+
 ### "Find papers about X"
 
 1. Search arXiv (`search_query=all:%22X%22`, relevance sort) — present ID,
@@ -142,7 +151,10 @@ curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
 
 - **HTTPS everywhere** — the proxy silently drops plain-HTTP arXiv requests.
 - **Be polite to arXiv**: one request at a time, no bulk scraping; batch ID
-  lookups into a single `id_list` call.
+  lookups into a single `id_list` call. arXiv also 429s ("Rate exceeded",
+  sometimes as an empty body) after repeated calls — wait ~10 s and retry
+  once; if a search just ran minutes ago, reuse its result instead of
+  re-querying.
 - **Never fetch paywalled/pirated sources** (Sci-Hub etc.) — arXiv, HF, and
   `openAccessPdf` links only.
 - **Don't read PDFs into context to "verify" them** — `file` + size check is
