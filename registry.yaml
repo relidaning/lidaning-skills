@@ -15,5 +15,5 @@ skills:
     path: skills/claude-maxer
   - name: nextcloud-paper
     path: skills/nextcloud-paper
-  - name: paper
-    path: skills/paper
+  - name: paper-fetch
+    path: skills/paper-fetch

@@ -1,5 +1,5 @@
 ---
-name: paper
+name: paper-fetch
 description: >
   Activate whenever research papers come up in the conversation — asking
   whether a paper exists, discussing a paper or model report, or asking to
