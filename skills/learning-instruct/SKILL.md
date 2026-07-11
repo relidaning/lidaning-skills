@@ -79,13 +79,18 @@ and `$OBSIDIAN_MCP_TOKEN`):
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" \
-  "$OBSIDIAN_MCP_URL/vault/"
+  "${OBSIDIAN_MCP_URL%/}/vault/"
 ```
 
-- **Obsidian reachable (2xx)** — write subject files directly to the vault under
-  `obsidian-rag/<Subject>.md` via `PUT $OBSIDIAN_MCP_URL/vault/obsidian-rag/<Subject>.md`.
-  Do **not** ask the user; just write there and tell them the note path. On every
-  subsequent update, overwrite the same path.
+(`$OBSIDIAN_MCP_URL` may have a trailing slash — always strip it with
+`${OBSIDIAN_MCP_URL%/}` before appending a path, or the API returns 404 on
+the resulting `//` and Obsidian looks unreachable when it isn't.)
+
+- **Obsidian reachable (2xx)** — write subject files directly to the vault
+  root as `<Subject>.md` via `PUT ${OBSIDIAN_MCP_URL%/}/vault/<Subject>.md`
+  (root, not a subfolder — per user preference, generated docs go to the vault
+  root so they're easy to find). Do **not** ask the user; just write there and
+  tell them the note path. On every subsequent update, overwrite the same path.
 - **Obsidian unreachable** — fall back to coding-orchestrate for local project storage.
 
 ### Phase 2: Compose
