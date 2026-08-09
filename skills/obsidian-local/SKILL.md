@@ -74,6 +74,12 @@ Or `PUT /vault/path%2Fto%2Fnote.md` via REST API.
 - Append: `obsidian_append_to_note`
 - Frontmatter only: `obsidian_manage_frontmatter`
 
+New content added to a note (a create, a write, or an append — e.g. a word
+pasted into a vocab log) is headed by the current date as an H1, `# YYYY-MM-DD`,
+directly above that content. Before adding the heading, check whether a
+`# YYYY-MM-DD` for today already exists in the note; if it does, append the
+new content under that existing heading instead of adding a duplicate one.
+
 ### Delete a note
 
 `obsidian_delete_note("path/to/note.md")` — irreversible, confirms with user first.
@@ -89,3 +95,14 @@ Or `PUT /vault/path%2Fto%2Fnote.md` via REST API.
   well-structured markdown. Proper headings, balanced blank lines, fenced code blocks with
   language tags, readable link text, no wall-of-text paragraphs. The note should be
   immediately readable in Obsidian's preview and source modes
+- **Date-stamp new content as H1** — any content written or appended to a note (create, write,
+  or append) gets the current date as an H1 heading, `# YYYY-MM-DD`, directly above it. If a
+  heading for today already exists in the note, add the new content under that heading instead
+  of creating a duplicate
+- **Generated docs go to vault root** — when Claude generates a standalone report/doc to save
+  in the vault (e.g. a summary, an audit log, a run report) and the user hasn't given an
+  explicit path, write it to the vault root (no subfolder) so the user can find it immediately
+  without navigating. This overrides any other default subfolder convention unless the user
+  specifies a path or a project's own docs say otherwise for that specific artifact.
+  **Exception — paper summary notes**: notes produced by the `paper-fetch` skill for
+  downloaded papers always go to `0_dev/AI/Papers/`, not the vault root.
