@@ -19,12 +19,20 @@ Self-Evolving Agent Skills") to a single Claude Code session: treat a
 SKILL.md as the *trainable state*, propose small validated edits, keep only
 the ones that measurably help. The paper's demo (`/data/apps/myai/demo/skillopt/`)
 trains against a scoreable HR-compliance benchmark with a separate optimizer
-LLM and dozens of API rollouts per step. We don't have that — no automated
-verifier exists for "does this skill trigger well" — so this version scales
-the same mechanics down to fit inside a conversation, with Claude playing
-optimizer, and a **fresh-context subagent** playing the held-out validator
-(same fresh-eyes principle as `/code-review`'s verify pass, standing in for
-the paper's separate optimizer-vs-target-model split).
+LLM and dozens of API rollouts per step. We don't have that at that scale, but
+an automated trigger check does exist: run the candidate against fixed probe
+prompts with `claude -p "<prompt>" --model <id> --output-format stream-json
+--verbose` and grep the stream for `"name":"Skill"` (TRIGGERED/SKIPPED per
+probe, 2 passes per candidate since single probes are noisy). Always pass
+`--disallowedTools Bash Edit Write NotebookEdit Task mcp__obsidian__vault_write
+mcp__obsidian__vault_append mcp__obsidian__vault_patch mcp__obsidian__vault_delete`
+— without it, probes run in the repo under test with full write access — and
+diff the repo after a probe batch. This version scales the paper's mechanics
+down to fit inside a conversation, with Claude playing optimizer, the probe
+script playing the held-out trigger validator, and a **fresh-context
+subagent** judging body-output quality against the held-out probes (same
+fresh-eyes principle as `/code-review`'s verify pass, standing in for the
+paper's separate optimizer-vs-target-model split).
 
 ## Two modes
 
@@ -91,13 +99,18 @@ impact on the direction criteria, apply only the top-ranked ones within
 budget to a candidate `SKILL.md`. Do not do a full rewrite — bounded,
 localized edits only, so later rounds can still tell what helped.
 
-### 4. Validation gate — fresh eyes required
-Spawn a `general-purpose` subagent with **only**: the candidate SKILL.md, the
-2 held-out probes, the direction criteria, and the general rubric. It has no
-memory of why the edit was made. Ask it to score the candidate the same way
-a model deciding whether to call `Skill()` would, plus whether body output
-would satisfy the held-out probes. Foreground this call — the loop can't
-continue without the score.
+### 4. Validation gate — measured trigger + fresh eyes
+Two checks, both required:
+- **Trigger**: run the 2 held-out probes (plus any negative probes) through
+  the automated `claude -p --output-format stream-json` method above against
+  the candidate SKILL.md, and record TRIGGERED/SKIPPED per probe. This
+  replaces guessing at trigger behavior — a subagent's opinion of a
+  description is not evidence of what a model actually does with it.
+- **Body quality**: spawn a `general-purpose` subagent with **only**: the
+  candidate SKILL.md, the 2 held-out probes, the direction criteria, and the
+  general rubric. It has no memory of why the edit was made. Ask it whether
+  body output would satisfy the held-out probes' criteria. Foreground this
+  call — the loop can't continue without the score.
 
 Accept the candidate only if **both**:
 - direction score is strictly better than baseline (ties rejected), and
@@ -149,5 +162,8 @@ its own thing, or call this skill for the audit step; either is fine.
 - Never skip the validation gate to save time. An edit that "looks obviously
   right" still goes through it — the paper's ablations are explicit that
   removing the gate lets harmful proposals accumulate.
+- Probe batches burn the 5h usage window fast — write the run log
+  incrementally as probes complete, not only at the end, so a session-limit
+  cutoff mid-run still leaves a usable report.
 - `skills/obsidian-rag/` has no `SKILL.md` and isn't in `registry.yaml` —
   never target it.

@@ -13,10 +13,13 @@ markdown content — goal, compositions, steps, subject reference, issues log,
 and documentation summaries. It hands all output to the coding-orchestrate
 skill, which owns the recording layer and knows where to persist it.
 
-This skill does **not** write files directly. It generates content and passes
-it to coding-orchestrate for storage. Before handing off, it detects whether
-a notes MCP (like Obsidian) is connected and asks the user where to store
-the materials — vault or local project.
+For local project storage, this skill does **not** write files directly — it
+generates content and passes it to coding-orchestrate for storage. The one
+exception is the vault: when Obsidian is reachable, this skill writes subject
+files there directly via the REST API rather than routing through
+coding-orchestrate (see "Storage location" below). Before handing off local
+content, it detects whether a notes MCP (like Obsidian) is connected and asks
+the user where to store the materials — vault or local project.
 
 ### Generated files (handed to coding-orchestrate)
 
@@ -175,10 +178,11 @@ Hand all evaluation output to coding-orchestrate for recording.
 
 ## Rules
 
-- **Generate, don't write** — this skill generates markdown content and hands
-  it to coding-orchestrate. It never writes files directly. It checks for
-  connected notes MCPs to offer the user a storage choice (vault vs project),
-  but doesn't know vault paths or I/O details — coding-orchestrate handles that
+- **Generate, don't write, for local project storage** — this skill generates
+  markdown content and hands it to coding-orchestrate, which owns local vault
+  paths and I/O details. The vault path is the one exception: when Obsidian is
+  reachable, this skill writes subject files there directly (see "Storage
+  location") instead of handing off
 - **Files evolve with conversation** — the generated content is live, not
   one-time. Whenever the conversation changes something (goal shifts,
   composition reordered, part mastered, new insight surfaced), regenerate

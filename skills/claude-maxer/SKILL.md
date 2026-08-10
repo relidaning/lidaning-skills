@@ -122,13 +122,16 @@ caps (below) are the real backstop, not this check.
 
 A real OS crontab entry (not the session-scoped `CronCreate` — that only
 fires while a Claude Code REPL is idle, unreliable for 1am/6am with nothing
-open) runs at **05:02/10:02/15:02/20:02/00:02** Asia/Shanghai — 1 hour
-*before* each cloud ping slot, so the long-term work has run its course
-before the next window-opening ping fires:
+open) drives this. Cadence was tightened from an hourly-offset schedule to
+every 30 minutes on 2026-08-11 (a gated fire that skips costs one metadata
+call, not quota, and the old 2h gap meant a window could reset unused):
 
 ```
-2 5,10,15,20,0 * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh >> /tmp/claude-maxer-cron.log 2>&1
+*/30 * * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh >> /tmp/claude-maxer-cron.log 2>&1
 ```
+
+Check `crontab -l` for the current state (enabled/disabled and cadence both
+change over time — this file is documentation, not the source of truth).
 
 `run_maxer_work.sh` loops rather than running one task and exiting:
 
@@ -228,8 +231,9 @@ need no PR.
 
 - Live routine: `schedule` skill, or https://claude.ai/code/routines
   (deletion also goes through that URL — can't delete via API)
-- Local cron: `crontab -l` / `crontab -e` (work loop — currently disabled —
-  plus the 15-min usage-snapshot refresh; its last run's output is in
+- Local cron: `crontab -l` / `crontab -e` (work loop enabled since
+  2026-08-10 21:22 at `*/30 * * * *`, unless later commented out — plus the
+  15-min usage-snapshot refresh; its last run's output is in
   `/tmp/claude-maxer-usage-fetch.log`)
 - Run history: `~/.claude/state/claude-maxer.log.jsonl`
 - Last headless run's full output: `/tmp/claude-maxer-last-run.log`
