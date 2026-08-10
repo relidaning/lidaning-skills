@@ -52,10 +52,17 @@ run, and checks each off in the vault when done.
   with reason, done, failed, or handled-but-unmarked).
 - Last run's full `claude -p` transcript/output: `/tmp/vault-tasks-last-run.log`.
 - Per-run budget cap: `--max-budget-usd 5`; wall-clock cap: `timeout 25m`.
-- Cron line: `*/30 * * * * /data/apps/lidaning-skills/skills/vault-tasks/run_tasks.sh >> /tmp/vault-tasks-cron.log 2>&1`.
-- To pause: comment out that crontab line (`crontab -e`) -- same pattern as
-  the disabled `claude-maxer` opportunistic-work entry already in this
-  crontab. Nothing else needs to change.
+- **Not currently scheduled.** The standalone cron line
+  (`*/30 * * * * .../vault-tasks/run_tasks.sh`) was commented out 2026-08-10;
+  the crontab comment beside it claims the drain was "folded into
+  `run_maxer_work.sh` as priority-1 work," but `run_maxer_work.sh` (checked
+  2026-08-11) has no reference to `Tasks.md`, `vault_tasks.py`, or
+  `myfollows` anywhere in it — that fold-in was never actually implemented.
+  So as of now nothing fires `run_tasks.sh` automatically; it's runnable by
+  hand (`skills/vault-tasks/run_tasks.sh`) for a single task, or reinstate
+  the crontab line above to restore the old standalone schedule. Check
+  `crontab -l` for the current ground truth before trusting this note.
+- To (re)enable: uncomment or re-add that crontab line via `crontab -e`.
 - Direct-to-master commits mean a bad unattended change can land without
   review -- if that stops feeling safe, the fix is switching `run_tasks.sh`'s
   prompt to the branch+draft-PR pattern claude-maxer uses for its own

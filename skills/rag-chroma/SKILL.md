@@ -27,6 +27,9 @@ docker compose -f skills/rag-chroma/docker-compose.yml up -d
 ```
 
 Requires `OBSIDIAN_MCP_TOKEN` in the shell environment (Obsidian Local REST API plugin).
+`rag_answer` additionally requires `LLM_API_KEY` set in `docker-compose.yml`'s environment
+(it raises at call time if unset) — `LLM_BASE_URL` (default: OpenAI) and `LLM_MODEL`
+(default `gpt-4o-mini`) are optional overrides for a non-OpenAI-compatible backend.
 
 ## MCP tools
 
@@ -34,6 +37,7 @@ Requires `OBSIDIAN_MCP_TOKEN` in the shell environment (Obsidian Local REST API 
 |---|---|
 | `rag_load(doc_id?)` | Load vault notes into the index. No arg = all notes recursively; pass a vault-relative path for one note. |
 | `rag_search(query, k)` | Semantic search — returns `[{id, metadata, score, snippet}]` |
+| `rag_answer(query, k=4)` | Retrieve top-k chunks and generate a grounded, cited answer via an LLM — returns `{answer, sources, chunks}`. Use this instead of `rag_search` when the user wants a synthesized answer, not raw snippets. Requires `LLM_API_KEY` (see Prerequisites). |
 | `rag_ingest(documents)` | Embed and store arbitrary text — accepts `[{id, content, metadata}]` |
 | `rag_status()` | Show doc count, tracked files, watch interval |
 | `rag_remove(doc_id)` | Remove a single chunk by ID |
