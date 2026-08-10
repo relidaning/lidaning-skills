@@ -43,29 +43,27 @@ When the user invokes `/model-switch` directly, run this flow:
 3. **Ask the user** with AskUserQuestion. Nine models don't fit one question:
    ask the provider first (Anthropic / DeepSeek / GLM / Kimi), then that
    provider's models, marking the current override "(current)" if set.
-4. **Apply on confirmation**:
-   ```bash
-   curl -s --noproxy '*' -X POST http://localhost:8787/switch \
-     -H 'Content-Type: application/json' -d '{"model": "deepseek/deepseek-chat"}'
-   ```
-   The override is sticky and server-side: every subsequent request through the
-   proxy routes there — an already-running proxied session switches immediately,
-   no restart. `DELETE /switch` reverts to normal routing.
-5. **Persist the base URL to match the choice** — a running session's env is
-   fixed at launch, so making the switch real requires the settings `env`
-   block, which Claude Code applies to every new session:
-   - **Non-Anthropic model confirmed** → merge
-     `"env": { "ANTHROPIC_BASE_URL": "http://localhost:8787" }` into
-     `~/.claude/settings.json` (read-modify-write the JSON, e.g. with
-     `python3 -c ...` or `jq`; never clobber other keys).
-   - **Anthropic model confirmed, or user reverts** → `DELETE /switch` on the
-     proxy AND delete the `ANTHROPIC_BASE_URL` key from that `env` block, so
-     the default direct-to-Anthropic connection is restored.
+4. **Apply on confirmation** — delegate to `switch.sh` so it stays the single
+   source of truth for proxy state and settings persistence:
+   - **Non-Anthropic model confirmed** →
+     ```bash
+     ./switch.sh use deepseek/deepseek-chat
+     ```
+     Starts the proxy if it's down, sets the sticky server-side override (an
+     already-proxied running session switches immediately, no restart), and
+     persists `"env": { "ANTHROPIC_BASE_URL": "http://localhost:8787" }` into
+     `~/.claude/settings.json` in one step.
+   - **Anthropic model confirmed, or user reverts** →
+     ```bash
+     ./switch.sh off
+     ```
+     Clears the proxy override and removes `ANTHROPIC_BASE_URL` from
+     `~/.claude/settings.json`, restoring direct-to-Anthropic routing.
    - This is the **only** flow allowed to touch `ANTHROPIC_BASE_URL` in
      settings. Never set it at install time, on proxy start, or anywhere else —
      the default base URL stays direct unless the user confirms a switch via
      `/model-switch`.
-6. **Say what it applies to** — the settings `env` takes effect for **new**
+5. **Say what it applies to** — the settings `env` takes effect for **new**
    sessions; already-running sessions keep the base URL they launched with
    (check with `echo $ANTHROPIC_BASE_URL`; proxied = `http://localhost:8787`).
    If the current session isn't proxied, say the switch is persisted but this
