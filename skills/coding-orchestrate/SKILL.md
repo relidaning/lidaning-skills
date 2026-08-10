@@ -2,9 +2,11 @@
 name: coding-orchestrate
 description: >
   Activate at session start, when the user starts a new task or asks "what's
-  next?", after a non-obvious design decision, or before session end (update
-  SESSION.md). Tracks session progress via SESSION.md, TODO.md, MEMORIES.md,
-  and README.md.
+  next?", when the user says "remember..." something, when a task or bug
+  surfaces mid-conversation that should be tracked for later, after a
+  non-obvious design decision, or before session end (update SESSION.md).
+  Tracks session progress via SESSION.md, TODO.md, MEMORIES.md, and
+  README.md.
 ---
 
 ## Principles

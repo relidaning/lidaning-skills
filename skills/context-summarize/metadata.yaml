@@ -1,0 +1,8 @@
+name: context-summarize
+description: Summarize or condense a chunk of context (pasted text, a file, a URL, or the conversation so far) into compact text returned directly to the user — not persisted anywhere.
+scope: project
+tags:
+  - summarize
+  - context
+  - condense
+  - recap

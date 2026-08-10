@@ -1,8 +1,8 @@
 # MEMORIES.md
 
-Things the user explicitly asked you to remember. The file lives at the project
-root as `MEMORIES.md`. Add entries when the user says "remember that…",
-"don't forget…", "note for next time…", or similar.
+Things the user explicitly asked you to remember. The file lives at
+`.claude/MEMORIES.md` (under the project root). Add entries when the user
+says "remember that…", "don't forget…", "note for next time…", or similar.
 
 ## Format
 
@@ -21,7 +21,7 @@ when the user explicitly asks.
 
 ## Rules
 
-- **One file** — `MEMORIES.md` at project root
+- **One file** — `.claude/MEMORIES.md`
 - **Explicit requests only** — the user must ask you to remember something.
   Don't infer memories from conversation. This keeps the file high-signal.
 - **Add immediately** — when the user says "remember that…", add it right

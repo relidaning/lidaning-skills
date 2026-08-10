@@ -25,7 +25,9 @@ proxy-start() {
         return 0
     fi
     echo "🚀 Starting Claude proxy on :$CLAUDE_PROXY_PORT ..."
-    cd "$CLAUDE_PROXY_DIR" && npx tsx proxy.ts &>/tmp/claude-proxy.log &
+    # NODE_USE_ENV_PROXY: make Node's fetch() honor http_proxy/https_proxy —
+    # required to reach api.anthropic.com through the local xray proxy.
+    cd "$CLAUDE_PROXY_DIR" && NODE_USE_ENV_PROXY=1 npx tsx proxy.ts &>/tmp/claude-proxy.log &
     disown
     sleep 1
     echo "✓ Proxy started (logs: /tmp/claude-proxy.log)"

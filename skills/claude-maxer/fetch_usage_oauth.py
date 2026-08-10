@@ -33,6 +33,7 @@ Usage: fetch_usage_oauth.py [--no-write] [--raw] [--refresh] [--vault-log]
 Exit codes: 0 = snapshot written (or data printed), 2 = auth problem
 (unreadable credentials / refresh rejected), 1 = anything else.
 """
+
 import argparse
 import json
 import os
@@ -65,13 +66,17 @@ def refresh_access_token(opener, creds):
     oauth = creds["claudeAiOauth"]
     req = urllib.request.Request(
         TOKEN_ENDPOINT,
-        data=json.dumps({
-            "grant_type": "refresh_token",
-            "refresh_token": oauth["refreshToken"],
-            "client_id": CLIENT_ID,
-        }).encode(),
-        headers={"Content-Type": "application/json",
-                 "User-Agent": "claude-maxer/fetch_usage_oauth"},
+        data=json.dumps(
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": oauth["refreshToken"],
+                "client_id": CLIENT_ID,
+            }
+        ).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "claude-maxer/fetch_usage_oauth",
+        },
     )
     with opener.open(req, timeout=30) as r:
         tok = json.load(r)
@@ -121,18 +126,22 @@ def vault_log(rate_limits, scoped):
         raise RuntimeError("no OBSIDIAN_MCP_TOKEN in env or ~/.zshrc.local")
     base = (os.environ.get("OBSIDIAN_MCP_URL") or "http://127.0.0.1:27123").rstrip("/")
 
-    note_path = f"0_dev/AI/claude-maxer/usage-log-{time.strftime('%Y-%m-%d')}.md"
+    note_path = f"claude-maxer/usage/{time.strftime('%Y-%m-%d')}.md"
     url = f"{base}/vault/{urllib.request.quote(note_path)}"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "text/markdown"}
 
     five = rate_limits.get("five_hour", {})
     seven = rate_limits.get("seven_day", {})
-    line = (f"- {time.strftime('%H:%M')} — 5h **{five.get('used_percentage', '?')}%**"
-            f" (resets {_fmt_reset(five.get('resets_at'))})"
-            f" · 7d **{seven.get('used_percentage', '?')}%**"
-            f" (resets {_fmt_reset(seven.get('resets_at'), long=True)})")
-    line += "".join(f" · {s['model'] or s['kind']} 7d **{s['percent']}%**" for s in scoped)
+    line = (
+        f"- {time.strftime('%H:%M')} — 5h **{five.get('used_percentage', '?')}%**"
+        f" (resets {_fmt_reset(five.get('resets_at'))})"
+        f" · 7d **{seven.get('used_percentage', '?')}%**"
+        f" (resets {_fmt_reset(seven.get('resets_at'), long=True)})"
+    )
+    line += "".join(
+        f" · {s['model'] or s['kind']} 7d **{s['percent']}%**" for s in scoped
+    )
     line += "\n"
 
     # New day = new note: give it a heading before the first entry.
@@ -145,12 +154,16 @@ def vault_log(rate_limits, scoped):
             raise
         exists = False
     if not exists:
-        line = (f"# claude-maxer usage log — {time.strftime('%Y-%m-%d')}\n\n"
-                f"Appended by `fetch_usage_oauth.py --vault-log` "
-                f"(cron, every 15 min).\n\n{line}")
+        line = (
+            f"# claude-maxer usage log — {time.strftime('%Y-%m-%d')}\n\n"
+            f"Appended by `fetch_usage_oauth.py --vault-log` "
+            f"(cron, every 15 min).\n\n{line}"
+        )
 
     # POST /vault/<path> appends (Local REST API v4+), creating if missing.
-    req = urllib.request.Request(url, data=line.encode(), headers=headers, method="POST")
+    req = urllib.request.Request(
+        url, data=line.encode(), headers=headers, method="POST"
+    )
     with opener.open(req, timeout=10) as r:
         r.read()
     return note_path
@@ -158,14 +171,24 @@ def vault_log(rate_limits, scoped):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--no-write", action="store_true",
-                    help="print parsed result, don't touch the snapshot")
-    ap.add_argument("--raw", action="store_true",
-                    help="dump the full API response to stderr")
-    ap.add_argument("--refresh", action="store_true",
-                    help="force an OAuth token refresh before fetching")
-    ap.add_argument("--vault-log", action="store_true",
-                    help="append this fetch to a daily Obsidian heartbeat note")
+    ap.add_argument(
+        "--no-write",
+        action="store_true",
+        help="print parsed result, don't touch the snapshot",
+    )
+    ap.add_argument(
+        "--raw", action="store_true", help="dump the full API response to stderr"
+    )
+    ap.add_argument(
+        "--refresh",
+        action="store_true",
+        help="force an OAuth token refresh before fetching",
+    )
+    ap.add_argument(
+        "--vault-log",
+        action="store_true",
+        help="append this fetch to a daily Obsidian heartbeat note",
+    )
     args = ap.parse_args()
 
     try:
@@ -181,28 +204,39 @@ def main():
 
     # api.anthropic.com is only reachable through the local proxy on this
     # box (same requirement as claude -p; see run_maxer_work.sh).
-    proxy = os.environ.get("https_proxy") or os.environ.get("http_proxy") or DEFAULT_PROXY
+    proxy = (
+        os.environ.get("https_proxy") or os.environ.get("http_proxy") or DEFAULT_PROXY
+    )
     opener = urllib.request.build_opener(
-        urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    )
 
     expires_at = creds["claudeAiOauth"].get("expiresAt", 0) / 1000
     if args.refresh or time.time() > expires_at - EXPIRY_MARGIN_S:
         try:
             token = refresh_access_token(opener, creds)
-            print(f"refreshed OAuth token (new expiry in "
-                  f"{(creds['claudeAiOauth']['expiresAt']/1000 - time.time())/3600:.1f}h)",
-                  file=sys.stderr)
+            print(
+                f"refreshed OAuth token (new expiry in "
+                f"{(creds['claudeAiOauth']['expiresAt'] / 1000 - time.time()) / 3600:.1f}h)",
+                file=sys.stderr,
+            )
         except Exception as e:
-            print(f"AUTH: token refresh failed ({e}) — falling back to the "
-                  f"stored access token", file=sys.stderr)
+            print(
+                f"AUTH: token refresh failed ({e}) — falling back to the "
+                f"stored access token",
+                file=sys.stderr,
+            )
 
     def get_usage(tok):
-        req = urllib.request.Request(USAGE_ENDPOINT, headers={
-            "Authorization": f"Bearer {tok}",
-            "anthropic-beta": "oauth-2025-04-20",
-            "Content-Type": "application/json",
-            "User-Agent": "claude-maxer/fetch_usage_oauth",
-        })
+        req = urllib.request.Request(
+            USAGE_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "anthropic-beta": "oauth-2025-04-20",
+                "Content-Type": "application/json",
+                "User-Agent": "claude-maxer/fetch_usage_oauth",
+            },
+        )
         with opener.open(req, timeout=30) as r:
             return json.load(r)
 
@@ -219,8 +253,9 @@ def main():
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")[:500]
         if e.code in (401, 403):
-            print(f"AUTH: HTTP {e.code} even after token refresh: {body}",
-                  file=sys.stderr)
+            print(
+                f"AUTH: HTTP {e.code} even after token refresh: {body}", file=sys.stderr
+            )
             return 2
         print(f"ERROR: HTTP {e.code} from usage endpoint: {body}", file=sys.stderr)
         return 1
@@ -241,25 +276,37 @@ def main():
             "resets_at": iso_to_epoch(win.get("resets_at")),
         }
     if not rate_limits:
-        print("ERROR: response had no five_hour/seven_day utilization "
-              "(schema change? re-run with --raw)", file=sys.stderr)
+        print(
+            "ERROR: response had no five_hour/seven_day utilization "
+            "(schema change? re-run with --raw)",
+            file=sys.stderr,
+        )
         return 1
 
     # Model-scoped weekly limits (e.g. per-model caps) ride along for
     # visibility; check_usage.py ignores them.
     scoped = [
-        {"kind": lim.get("kind"), "percent": lim.get("percent"),
-         "resets_at": iso_to_epoch(lim.get("resets_at")),
-         "model": ((lim.get("scope") or {}).get("model") or {}).get("display_name")}
-        for lim in (data.get("limits") or []) if lim.get("kind") == "weekly_scoped"
+        {
+            "kind": lim.get("kind"),
+            "percent": lim.get("percent"),
+            "resets_at": iso_to_epoch(lim.get("resets_at")),
+            "model": ((lim.get("scope") or {}).get("model") or {}).get("display_name"),
+        }
+        for lim in (data.get("limits") or [])
+        if lim.get("kind") == "weekly_scoped"
     ]
 
     if args.no_write:
-        print(json.dumps({"rate_limits": rate_limits, "scoped_limits": scoped}, indent=2))
+        print(
+            json.dumps({"rate_limits": rate_limits, "scoped_limits": scoped}, indent=2)
+        )
         return 0
 
-    snapshot = {"rate_limits": rate_limits, "cached_at": time.time(),
-                "source": "oauth-api"}
+    snapshot = {
+        "rate_limits": rate_limits,
+        "cached_at": time.time(),
+        "source": "oauth-api",
+    }
     if scoped:
         snapshot["scoped_limits"] = scoped
     os.makedirs(os.path.dirname(SNAPSHOT_PATH), exist_ok=True)
@@ -276,9 +323,11 @@ def main():
             # Obsidian closed / plugin off / token moved — never fail the fetch.
             print(f"WARN: vault log skipped ({e})", file=sys.stderr)
 
-    parts = [f"{lbl}={rate_limits[key]['used_percentage']}%"
-             for key, lbl in [("five_hour", "5h"), ("seven_day", "7d")]
-             if key in rate_limits]
+    parts = [
+        f"{lbl}={rate_limits[key]['used_percentage']}%"
+        for key, lbl in [("five_hour", "5h"), ("seven_day", "7d")]
+        if key in rate_limits
+    ]
     parts += [f"{s['model'] or s['kind']}(7d)={s['percent']}%" for s in scoped]
     print("OK: snapshot updated from oauth api — " + " ".join(parts))
     return 0

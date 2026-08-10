@@ -1,0 +1,4 @@
+name: skillopt
+description: Directed or general-audit optimization loop for SKILL.md files — propose bounded edits, validate against held-out probes, keep only improvements.
+scope: project
+tags: [meta, skills, optimization, audit]

@@ -12,6 +12,8 @@
 
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +76,35 @@ const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER ?? "anthropic";
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "claude-sonnet-4-6";
 const PORT = Number(process.env.PROXY_PORT ?? 8787);
 
+// Server-side model override, set via POST /switch. While active it wins over
+// the model name in incoming requests, so a running session can be switched
+// from outside (e.g. by the model-switch skill) without touching the client.
+//
+// Persisted to STATE_FILE so a proxy restart keeps routing to the switched
+// provider — otherwise settings.json would still point sessions at the proxy
+// while the proxy silently fell back to Anthropic (and its rate limit).
+const STATE_FILE = `${process.env.HOME}/.claude/state/model-switch.json`;
+
+let switchOverride: { provider: string; model: string } | null = null;
+try {
+  const saved = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+  if (saved?.provider && saved?.model) {
+    switchOverride = { provider: saved.provider, model: saved.model };
+    console.log(`⚡ Restored override from state: ${saved.provider}/${saved.model}`);
+  }
+} catch {
+  // no state file yet — start with no override
+}
+
+function persistOverride() {
+  try {
+    mkdirSync(dirname(STATE_FILE), { recursive: true });
+    writeFileSync(STATE_FILE, JSON.stringify(switchOverride ?? {}, null, 2));
+  } catch (err) {
+    console.error(`✗ Failed to persist override to ${STATE_FILE}:`, err);
+  }
+}
+
 // Headers Claude Code sends that we should never forward upstream
 const ALWAYS_STRIP = new Set([
   "host",
@@ -102,6 +133,7 @@ function buildUpstreamHeaders(
     if (ALWAYS_STRIP.has(lower)) return;
     if (lower === "authorization") return;
     if (lower === "x-api-key") return;
+    if (lower === "content-type") return; // set explicitly below; copying too duplicates the header
     if (providerStrip.has(lower)) return;
     out[key] = val;
   });
@@ -182,8 +214,55 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/health", (c) =>
-  c.json({ status: "ok", providers: Object.keys(PROVIDERS), port: PORT }),
+  c.json({
+    status: "ok",
+    providers: Object.keys(PROVIDERS),
+    port: PORT,
+    override: switchOverride
+      ? `${switchOverride.provider}/${switchOverride.model}`
+      : null,
+  }),
 );
+
+// ── /switch — server-side model override ──────────────────────────────────────
+app.get("/switch", (c) =>
+  c.json({
+    override: switchOverride
+      ? `${switchOverride.provider}/${switchOverride.model}`
+      : null,
+  }),
+);
+
+app.post("/switch", async (c) => {
+  let body: { model?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const token = body.model ?? "";
+  const slash = token.indexOf("/");
+  if (slash <= 0 || slash === token.length - 1) {
+    return c.json({ error: 'Expected {"model": "<provider>/<model>"}' }, 400);
+  }
+  const provider = token.slice(0, slash);
+  const model = token.slice(slash + 1);
+  if (!PROVIDERS[provider]) {
+    const msg = `Unknown provider "${provider}". Available: ${Object.keys(PROVIDERS).join(", ")}`;
+    return c.json({ error: msg }, 400);
+  }
+  switchOverride = { provider, model };
+  persistOverride();
+  console.log(`⚡ Switch override → ${provider}/${model}`);
+  return c.json({ override: `${provider}/${model}` });
+});
+
+app.delete("/switch", (c) => {
+  switchOverride = null;
+  persistOverride();
+  console.log("⚡ Switch override cleared");
+  return c.json({ override: null });
+});
 
 app.get("/providers", (c) =>
   c.json(
@@ -239,6 +318,12 @@ app.post("/v1/messages", async (c) => {
       providerKey = parsedProvider;
       modelName = modelName.slice(slash + 1);
     }
+  }
+
+  // Precedence: in-chat /model command > /switch override > body.model prefix
+  if (switchOverride) {
+    providerKey = switchOverride.provider;
+    modelName = switchOverride.model;
   }
 
   const cmd = parseModelCommand(body.messages);
@@ -366,9 +451,11 @@ app.post("/v1/messages", async (c) => {
 // Handles session verification, OAuth token checks, and any other endpoints
 // Claude Code calls that are not /v1/messages or /v1/models.
 //
-// If Anthropic returns 401/403 (user is on DeepSeek-only, no valid OAuth, or
-// ANTHROPIC_API_KEY is dummy), we stub a 200 so Claude Code doesn't drop into
-// a login loop. /v1/messages still hits the configured provider directly.
+// If Anthropic returns an error (401/403 = no valid OAuth; 429 = rate limited;
+// 5xx = unavailable), we stub a 200 so Claude Code stays functional and
+// /v1/messages still routes to the configured provider. Without this, a rate
+// limit or outage on Anthropic prevents Claude Code from starting at all, even
+// when the user is routing through a non-Anthropic provider.
 app.all("*", async (c) => {
   const rawUrl = c.req.url;
   const queryString = rawUrl.includes("?") ? "?" + rawUrl.split("?").slice(1).join("?") : "";
@@ -392,7 +479,7 @@ app.all("*", async (c) => {
     return c.json({}, 200);
   }
 
-  if (upstream.status === 401 || upstream.status === 403) {
+  if (!upstream.ok) {
     console.log(`→ [passthrough-stub] ${c.req.method} ${c.req.path} (upstream ${upstream.status})`);
     return c.json({}, 200);
   }

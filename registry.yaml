@@ -17,3 +17,9 @@ skills:
     path: skills/nextcloud-paper
   - name: paper-fetch
     path: skills/paper-fetch
+  - name: context-summarize
+    path: skills/context-summarize
+  - name: skillopt
+    path: skills/skillopt
+  - name: vault-tasks
+    path: skills/vault-tasks

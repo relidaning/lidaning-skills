@@ -1,8 +1,8 @@
 # TODO.md
 
-Things discovered during conversation that need doing. The file lives at the
-project root as `TODO.md`. Add items as they come up naturally — never let a
-task get lost in the chat.
+Things discovered during conversation that need doing. The file lives at
+`.claude/TODO.md` (under the project root). Add items as they come up
+naturally — never let a task get lost in the chat.
 
 ## Format
 
@@ -18,7 +18,7 @@ task get lost in the chat.
 
 ## Rules
 
-- **One file** — `TODO.md` at project root
+- **One file** — `.claude/TODO.md`
 - **Discovered, not planned** — add items as they surface during conversation.
   A bug you can't fix now, a refactor noticed mid-task, a missing test.
 - **Add immediately** — when the user or you discovers something that needs

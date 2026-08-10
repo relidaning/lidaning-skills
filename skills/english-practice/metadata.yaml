@@ -1,4 +1,4 @@
 name: english-practice
-description: When user send a request In English, activate this skill.
+description: Activate on every user message regardless of language or fluency — always respond in English and check grammar/phrasing.
 scope: project
 tags: [english, writing, communication, practice]

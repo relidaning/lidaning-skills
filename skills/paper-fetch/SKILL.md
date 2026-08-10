@@ -6,8 +6,9 @@ description: >
   search, find, fetch, read, or download AI/ML/DL papers; also on any mention
   of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID, paper title,
   or paper URL. Searches arXiv, HF papers, and Semantic Scholar via their
-  public APIs, downloads PDFs to ~/papers/, and stores them in Nextcloud
-  papers/.
+  public APIs, downloads PDFs to ~/papers/, stores them in Nextcloud
+  papers/, and writes a summary note per paper to the Obsidian vault at
+  0_dev/AI/Papers/.
 ---
 
 ## Overview
@@ -21,7 +22,9 @@ keys, no MCP server.
 Downloads go to `~/papers/` (create it if missing), named
 `<arxiv-id> - <title>.pdf` (sanitize `/`, `:`, `?` out of titles), and are
 then uploaded to Nextcloud `papers/` (see "Store in Nextcloud" below) — the
-local copy stays as a cache.
+local copy stays as a cache. Every download also gets a **summary note in
+the Obsidian vault** at `0_dev/AI/Papers/` (see "Store a summary note in
+the vault" below).
 
 ## Sources
 
@@ -117,6 +120,8 @@ search hit.
 5. Upload the verified PDF to Nextcloud `papers/` (next section). If Nextcloud
    is unreachable, keep the local copy, tell the user the upload failed, and
    don't retry endlessly.
+6. Write a summary note to the Obsidian vault at `0_dev/AI/Papers/` (see
+   "Store a summary note in the vault" below).
 
 ### "What's new / trending this week?"
 
@@ -146,6 +151,28 @@ curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
 - **URL-encode the filename** (spaces, `&`, …) as shown; curl does not encode
   `-T` target URLs for you.
 - Skip the upload only if the user explicitly says local-only.
+
+### Store a summary note in the vault (standard step after every download)
+
+Every verified download also gets a markdown summary note in the Obsidian
+vault, written via the `obsidian-local` skill (MCP `vault_write`, curl REST
+fallback):
+
+- **Path**: `0_dev/AI/Papers/<arxiv-id> - <title>.md` (same title
+  sanitization as the PDF). This explicit path overrides `obsidian-local`'s
+  "generated docs go to vault root" default.
+- **Summary**: activate the `context-summarize` skill first — its
+  "Research papers" shape applies (Gist / Problem / Core idea / Mechanism /
+  Results / Limitations). The arXiv abstract alone is **too shallow**:
+  Read the downloaded PDF's abstract, introduction, and method sections
+  (a page-range Read of roughly pages 1-6 usually covers them) and write
+  a mechanism-level summary — key equations, what's trained vs. frozen,
+  the hyperparameters that matter, and headline results with baselines.
+- **Note shape**: YAML frontmatter (`arxiv`, `title`, `authors`, `published`,
+  `fetched`, `tags`), then the summary sections, then a **Links** section
+  with the arXiv abs URL and the Nextcloud path `papers/<filename>.pdf`.
+- If the vault is unreachable (Obsidian not running / REST API down), keep
+  going — report that the note wasn't written, don't retry endlessly.
 
 ## Rules
 
