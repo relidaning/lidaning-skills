@@ -83,6 +83,24 @@ list_skills() {
   done < "$REGISTRY"
 }
 
+install_status() {
+  # Distinguishes not-installed from a dangling symlink (e.g. after the
+  # source skill dir was renamed/moved), which -e alone can't do since it
+  # follows symlinks and reports false for both cases.
+  local link="$1"
+  if [[ -L "$link" ]]; then
+    if [[ -e "$link" ]]; then
+      echo "installed"
+    else
+      echo "broken"
+    fi
+  elif [[ -e "$link" ]]; then
+    echo "installed"
+  else
+    echo "-"
+  fi
+}
+
 list_installed() {
   echo "Skill install status:"
   echo ""
@@ -91,10 +109,8 @@ list_installed() {
     if [[ "$line" =~ ^\ *-\ name: ]]; then
       local name="${line#*: }"
       read -r path_line
-      local global_status="-"
-      local project_status="-"
-      [[ -e "$GLOBAL_SKILLS/$name/SKILL.md" ]] && global_status="installed"
-      [[ -e "$PROJECT_SKILLS/$name/SKILL.md" ]] && project_status="installed"
+      local global_status=$(install_status "$GLOBAL_SKILLS/$name/SKILL.md")
+      local project_status=$(install_status "$PROJECT_SKILLS/$name/SKILL.md")
       printf "  %-25s %-10s %-10s\n" "$name" "$global_status" "$project_status"
     fi
   done < "$REGISTRY"
