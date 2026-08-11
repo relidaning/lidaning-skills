@@ -1,24 +1,41 @@
 #!/usr/bin/env python3
-"""Pick the next undone task from the vault's Tasks.md, or mark one done.
+"""Read/write the undone-task queue in the Obsidian vault's Tasks note.
 
-Undone = any non-empty, non-heading line that doesn't already start with
-"- [x]" (case-insensitive). Plain prose lines (the file's current format)
-count as undone; "- [ ] ..." checkbox lines do too, for forward
-compatibility if tasks get added in that format later.
+This is a library + CLI only -- it owns no schedule. claude-maxer drives it
+(`pick` -> do the work -> `mark`); see SKILL.md.
 
-Talks to the Obsidian Local REST API directly over HTTP (not the MCP tool)
-so it works unattended from cron.
+Vault binding: the note is `Tasks.md` at the vault root, reachable over the
+Obsidian Local REST API. Override with VAULT_TASKS_PATH if it ever moves.
+
+What counts as a task
+---------------------
+A list item (`- ...`, `* ...`, `1. ...`) that is not already `- [x]`, or a
+standalone prose paragraph (the note's original format, before mark_done
+started rewriting handled lines as `- [x] ...`).
+
+A bare prose line directly under a list item is a *continuation* of that
+item, not a task of its own -- long entries get soft-wrapped onto a second
+physical line when typed in Obsidian. Treating one as a task is actively
+harmful: it hands half a sentence to the worker as the whole job (an entry
+about the claude-maxer skill got picked up as work scoped to a different
+repo), and marking it splits the user's single item into two.
+
+Talks to the REST API directly over HTTP rather than through the obsidian
+MCP tools, so it works from an unattended context with no MCP session.
 """
 import os
 import re
 import sys
 import urllib.request
 
-TASKS_PATH = "Tasks.md"
+TASKS_PATH = os.environ.get("VAULT_TASKS_PATH", "Tasks.md")
+DEFAULT_URL = "http://127.0.0.1:27123"
 
 
 def _url():
-    base = os.environ["OBSIDIAN_MCP_URL"].rstrip("/")
+    # OBSIDIAN_MCP_URL carries a trailing slash; naive appending yields a
+    # `//vault/...` path the REST API 404s on.
+    base = (os.environ.get("OBSIDIAN_MCP_URL") or DEFAULT_URL).rstrip("/")
     return f"{base}/vault/{TASKS_PATH}"
 
 
@@ -27,7 +44,10 @@ def _request(method, extra_headers=None, body=None):
     req.add_header("Authorization", f"Bearer {os.environ['OBSIDIAN_MCP_TOKEN']}")
     for k, v in (extra_headers or {}).items():
         req.add_header(k, v)
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    # Bypass the proxy: 127.0.0.1 traffic would otherwise be swallowed by
+    # http_proxy/https_proxy, which cron-side callers must set.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=15) as resp:
         return resp.read()
 
 
@@ -43,11 +63,26 @@ def is_done(line):
     return re.match(r"^\s*-\s*\[[xX]\]", line) is not None
 
 
-def is_task_line(line):
-    s = line.strip()
-    if not s or s.startswith("#"):
-        return False
-    return not is_done(line)
+def is_list_item(line):
+    return re.match(r"^\s*(?:[-*+]|\d+[.)])\s", line) is not None
+
+
+def undone_tasks(content):
+    """Yield (line_index, line) for each undone task, in file order."""
+    prev_is_list_item = False
+    for i, line in enumerate(content.splitlines()):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            prev_is_list_item = False
+            continue
+        if is_list_item(line):
+            prev_is_list_item = True
+            if not is_done(line):
+                yield i, line
+            continue
+        if prev_is_list_item:
+            continue  # wrapped continuation of the item above
+        yield i, line
 
 
 def mark_done(line):
@@ -59,17 +94,24 @@ def mark_done(line):
 
 
 def cmd_pick():
-    for line in get_content().splitlines():
-        if is_task_line(line):
-            print(line.strip())
-            return 0
+    for _, line in undone_tasks(get_content()):
+        print(line.strip())
+        return 0
     return 1
+
+
+def cmd_list():
+    found = False
+    for i, line in undone_tasks(get_content()):
+        print(f"{i + 1}\t{line.strip()}")
+        found = True
+    return 0 if found else 1
 
 
 def cmd_mark(target):
     lines = get_content().splitlines()
-    for i, line in enumerate(lines):
-        if is_task_line(line) and line.strip() == target.strip():
+    for i, line in undone_tasks("\n".join(lines)):
+        if line.strip() == target.strip():
             lines[i] = mark_done(line)
             put_content("\n".join(lines) + "\n")
             return 0
@@ -78,10 +120,12 @@ def cmd_mark(target):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: vault_tasks.py pick|mark <text>", file=sys.stderr)
+        print("usage: vault_tasks.py pick|list|mark <text>", file=sys.stderr)
         sys.exit(2)
     if sys.argv[1] == "pick":
         sys.exit(cmd_pick())
+    elif sys.argv[1] == "list":
+        sys.exit(cmd_list())
     elif sys.argv[1] == "mark" and len(sys.argv) >= 3:
         sys.exit(cmd_mark(sys.argv[2]))
     else:

@@ -42,6 +42,10 @@ export https_proxy="http://127.0.0.1:10808"
 REPO_DIR="/data/apps/lidaning-skills"
 SKILL_DIR="$REPO_DIR/skills/claude-maxer"
 LOG_FILE="$HOME/.claude/state/claude-maxer.log.jsonl"
+# Read by fetch_usage_oauth.py --vault-log so the vault's usage note says
+# what each quota jump bought, instead of just how big it was.
+ACTIVITY_FILE="$HOME/.claude/state/maxer_activity.json"
+MODEL="claude-sonnet-5"
 DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
@@ -65,6 +69,50 @@ print(json.dumps({'ts': time.time(), 'status': sys.argv[1], 'work_type': sys.arg
 " "$1" "$2" "$3" >> "$LOG_FILE"
 }
 
+record_activity() {
+  # $1=note — one short phrase for the vault usage note's trailing comment.
+  python3 -c "
+import json, sys, time
+json.dump({'ts': time.time(), 'model': sys.argv[1], 'note': sys.argv[2]}, open(sys.argv[3], 'w'))
+" "$MODEL" "$1" "$ACTIVITY_FILE"
+}
+
+# Times this work type already produced output today, from the run log.
+ran_today() {
+  python3 -c "
+import datetime, json, sys
+want, path = sys.argv[1], sys.argv[2]
+today, n = datetime.date.today(), 0
+try:
+    with open(path) as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if (e.get('status') == 'ran' and e.get('work_type') == want
+                    and datetime.date.fromtimestamp(e['ts']) == today):
+                n += 1
+except FileNotFoundError:
+    pass
+print(n)
+" "$1" "$LOG_FILE"
+}
+
+# Weighted pick, skipping anything that has hit its daily cap.
+pick_work_type() {
+  local pool=() t cap
+  for t in "${TYPES[@]}"; do
+    cap="${DAILY_CAP[$t]:-0}"
+    if (( cap > 0 )) && (( $(ran_today "$t") >= cap )); then
+      continue
+    fi
+    for ((i = 0; i < ${WEIGHTS[$t]}; i++)); do pool+=("$t"); done
+  done
+  (( ${#pool[@]} == 0 )) && return 1
+  printf '%s\n' "${pool[$RANDOM % ${#pool[@]}]}"
+}
+
 build_prompt() {
   case "$1" in
     skill-audit)
@@ -77,15 +125,34 @@ build_prompt() {
       echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). For each Node subproject under skills/ that has a package.json (e.g. skills/model-switch, skills/rag-chroma), run `npm outdated` and `npm audit` (read-only, do not upgrade or auto-fix anything). Compare findings against the most recent report at docs/claude-maxer-dependency-report-*.md if one exists. Only if there is something new to report (newly outdated packages, new vulnerabilities) or no prior report exists: write/update a concise markdown report at docs/claude-maxer-dependency-report-'"$3"'.md, create a new branch named claude-maxer/dep-audit-'"$3"', commit it, and open a draft PR via gh with the summary in the PR description. If there is nothing new versus the last report, say so and do nothing else. Do not push to master directly, and never run npm install/update/audit fix.'
       ;;
     papers-digest)
-      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://huggingface.co/papers/trending, pick 2-3 trending papers not already covered in a note from earlier today, and for each fetch its abstract/summary content (via WebFetch on the paper page — do not attempt to download raw PDFs). Write a concise summary (what problem it solves, key idea, why it is notable) for each paper. Use the obsidian-local skill to create one note in the vault under a papers/digest folder consistent with this vault'"'"'s existing conventions (look at how skill-opt logs are organized under 0_dev/AI/ for the pattern), dated today, containing the summaries and links back to the paper pages. This does not touch the git repo, so no branch or PR is needed.'
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://huggingface.co/papers/trending, pick 2-3 trending papers, and for each fetch its abstract/summary content (via WebFetch on the paper page — do not attempt to download raw PDFs). Write a concise summary (what problem it solves, key idea, why it is notable) for each paper. Use the obsidian-local skill to write the note at exactly claude-maxer/digest/papers-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only papers it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. If every trending paper is already covered, say so and write nothing. Link back to the paper pages. This does not touch the git repo, so no branch or PR is needed.'
       ;;
     news-digest)
-      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://hacker-news.firebaseio.com/v0/topstories.json, take the first 10 story ids, fetch each via https://hacker-news.firebaseio.com/v0/item/{id}.json, and pick the 3 most interesting ones by score/discussion volume that are not already covered in a note from earlier today. For each: fetch the linked article via WebFetch (skip Ask HN/Show HN self-posts with no external link, or fall back to just the HN discussion) and write a concise summary (what it is, why it is notable, key discussion point from the top comments if relevant). Use the obsidian-local skill to create one note in the vault under a news/digest folder consistent with this vault'"'"'s existing conventions (look at how papers/digest notes are organized for the pattern), dated today, containing the summaries and links back to both the article and the HN discussion thread. This does not touch the git repo, so no branch or PR is needed.'
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://hacker-news.firebaseio.com/v0/topstories.json, take the first 10 story ids, fetch each via https://hacker-news.firebaseio.com/v0/item/{id}.json, and pick the 3 most interesting ones by score/discussion volume. Note: fan-out loops over ids captured from a previous command must not use `for id in $ids` — the Bash tool runs zsh, which does not word-split unquoted parameter expansions, so that builds one URL containing spaces and every fetch comes back empty; use `${=ids}`, a zsh array, or do the fan-out in python3. For each story: fetch the linked article via WebFetch (skip Ask HN/Show HN self-posts with no external link, or fall back to just the HN discussion) and write a concise summary (what it is, why it is notable, key discussion point from the top comments if relevant). Use the obsidian-local skill to write the note at exactly claude-maxer/digest/news-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only stories it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. If every top story is already covered, say so and write nothing. Link back to both the article and the HN discussion thread. This does not touch the git repo, so no branch or PR is needed.'
       ;;
   esac
 }
 
 TYPES=(skill-audit todo-triage dep-audit papers-digest news-digest)
+
+# Work mix retuned 2026-08-11 from the vault's own record,
+# claude-maxer/usage/2026-08-11.md: the 06:00 window went 27% -> 100% in
+# roughly 40 minutes, and what the user could actually point at afterwards
+# was a handful of digest notes — several of them same-day duplicates of
+# each other, because uniform selection kept re-drawing the digest types and
+# every fire re-derived the day's digest from scratch. Digests are cheap to
+# produce and near-worthless on repeat, so they are now both down-weighted
+# and hard-capped per day; repo work carries the load. The point was never to
+# spend less quota — it is to stop paying digest prices for duplicate output.
+declare -A WEIGHTS=(
+  [skill-audit]=3 [todo-triage]=3 [dep-audit]=2 [papers-digest]=1 [news-digest]=1
+)
+# 0 = uncapped. Digests cap at one note per day each; the append-don't-
+# duplicate instruction in build_prompt is the second half of this fix.
+declare -A DAILY_CAP=(
+  [skill-audit]=0 [todo-triage]=0 [dep-audit]=0 [papers-digest]=1 [news-digest]=1
+)
+
 START_TS=$(date +%s)
 ITER=0
 TOTAL_COST="0"
@@ -123,7 +190,10 @@ while true; do
     break
   fi
 
-  WORK_TYPE="${TYPES[$RANDOM % ${#TYPES[@]}]}"
+  if ! WORK_TYPE="$(pick_work_type)"; then
+    log "stopped" "none" "every work type has hit its daily cap"
+    break
+  fi
   RUN_ID="$(date +%Y%m%d-%H%M%S)-i${ITER}"
   PROMPT="$(build_prompt "$WORK_TYPE" "$ITER" "$RUN_ID")"
 
@@ -137,7 +207,7 @@ while true; do
   OUT_FILE="/tmp/claude-maxer-last-run.log"
   echo "=== iter $ITER ($WORK_TYPE) $(date -Iseconds) ===" >> "$OUT_FILE"
   set +e
-  RESULT_JSON="$(claude -p "$PROMPT" --model claude-sonnet-5 --output-format json --max-budget-usd 3 --dangerously-skip-permissions 2>>"$OUT_FILE")"
+  RESULT_JSON="$(claude -p "$PROMPT" --model "$MODEL" --output-format json --max-budget-usd 3 --dangerously-skip-permissions 2>>"$OUT_FILE")"
   CALL_STATUS=$?
   set -e
   echo "$RESULT_JSON" >> "$OUT_FILE"
@@ -146,8 +216,10 @@ while true; do
     COST="$(echo "$RESULT_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total_cost_usd', 0))" 2>/dev/null || echo 0)"
     TOTAL_COST="$(python3 -c "print($TOTAL_COST + $COST)" 2>/dev/null || echo "$TOTAL_COST")"
     log "ran" "$WORK_TYPE" "iter=$ITER cost_usd=$COST cumulative_usd=$TOTAL_COST"
+    record_activity "$WORK_TYPE (\$$COST)"
   else
     log "failed" "$WORK_TYPE" "iter=$ITER see $OUT_FILE"
+    record_activity "$WORK_TYPE failed"
   fi
 done
 

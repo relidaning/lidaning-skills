@@ -87,10 +87,22 @@ under `scoped_limits`), so `check_usage.py` needs no changes.
   the script defaults the proxy internally and needs only `HOME`. Querying
   the usage endpoint is metadata-only — it does not consume quota or open
   the 5h window.
-- **Vault heartbeat (`--vault-log`):** each fetch appends one line
-  (`- HH:MM — 5h X% (resets …) · 7d Y% (…) · Fable 7d Z%`) to a daily note
-  at `0_dev/AI/claude-maxer/usage-log-YYYY-MM-DD.md` via Obsidian's Local
-  REST API — a human-visible proof the loop is alive, and a usage history
+- **Vault heartbeat (`--vault-log`):** each fetch appends one line to a
+  daily note at `claude-maxer/usage/YYYY-MM-DD.md` via Obsidian's Local
+  REST API. Format as of 2026-08-11:
+
+  ```
+  - 08:30 — 5h **100%** (resets 10:59), sonnet-5 'skill-audit ($0.42)'
+  ```
+
+  The trailing clause is the point of the note: a column of bare
+  percentages can't answer the only question worth asking of it — a window
+  went to 100%, in exchange for *what*? `run_maxer_work.sh` writes each
+  iteration to `~/.claude/state/maxer_activity.json` and `_activity_suffix()`
+  reads it, dropping records older than 30 min so an idle stretch doesn't
+  re-attribute one run's work to every later heartbeat. 7d was dropped from
+  the note the same day — it moves too slowly to earn a line every 15
+  minutes, and is still in the snapshot for `check_usage.py`'s pro-rata gate — a human-visible proof the loop is alive, and a usage history
   over the day. It talks to `127.0.0.1:27123` directly (proxy bypassed),
   reading the token from `$OBSIDIAN_MCP_TOKEN` or parsing
   `~/.zshrc.local` under cron. Vault errors (Obsidian closed, plugin off)
@@ -137,10 +149,13 @@ change over time — this file is documentation, not the source of truth).
 
 1. Before each iteration: runs `check_usage.py`; if it says skip, logs and
    breaks out of the loop.
-2. Otherwise picks one of the 4 work types at random each iteration (not a
-   fixed cycle — `ITER` resets to 1 on every fresh cron fire, so a
-   deterministic order would mean short runs always land on the same first
-   type), running it headlessly via
+2. Otherwise picks a work type via `pick_work_type()` — a *weighted* draw
+   (`WEIGHTS`), skipping any type that has hit its `DAILY_CAP` for the
+   calendar day, counted from `ran` entries in the run log. Still random
+   rather than a fixed cycle: `ITER` resets to 1 on every fresh cron fire,
+   so a deterministic order would mean short runs always land on the same
+   first type. If every type is capped, the loop logs and breaks. Runs it
+   headlessly via
    `claude -p --model claude-sonnet-5 --output-format json --max-budget-usd 3
    --dangerously-skip-permissions` in this repo. `--max-budget-usd 3` is a
    per-call safety net, not a loop-level budget.
@@ -198,7 +213,28 @@ this class of failure produces no cost signal to notice it by.
 ## The 5 work types
 
 Each prompt tells the headless agent it's running unattended and to stay
-within scope:
+within scope. The `weight`/`cap` columns are `WEIGHTS` and `DAILY_CAP` in
+`run_maxer_work.sh`; cap `—` means uncapped.
+
+| type | weight | cap/day | output |
+|---|---|---|---|
+| skill-audit | 3 | — | draft PR |
+| todo-triage | 3 | — | draft PR |
+| dep-audit | 2 | — | draft PR |
+| papers-digest | 1 | 1 | vault note |
+| news-digest | 1 | 1 | vault note |
+
+**Why the mix is weighted (retuned 2026-08-11).** It used to be a uniform
+draw over all five, which put 40% of every window into digests. The vault's
+own record (`claude-maxer/usage/2026-08-11.md`) showed the 06:00 window
+going 27% → 100% in ~40 minutes, and what the user could point at
+afterwards was a handful of digest notes — *seven* for the one day, several
+of them same-day duplicates, because every fire re-derived the day's digest
+from scratch. Digests are cheap to produce and near-worthless on repeat, so
+they are now down-weighted to ~20% combined *and* hard-capped at one note
+per type per day, with the prompts told to append to the existing day's note
+rather than create a `-2`/`-3` twin. The goal was never to spend less quota
+— it is to stop paying digest prices for duplicate output.
 
 - **skill-audit** — SkillOpt-style pass over `skills/*`: score trigger
   clarity + body quality per CLAUDE.md's criteria, bounded edits (≤4) for
@@ -209,12 +245,13 @@ within scope:
   subprojects under `skills/`, report only if something's new since the last
   report. Never runs install/update/audit-fix.
 - **papers-digest** — pull trending papers from
-  https://huggingface.co/papers/trending, summarize 2-3 via WebFetch, write
-  a note to the Obsidian vault via the `obsidian-local` skill.
+  https://huggingface.co/papers/trending, summarize 2-3 via WebFetch, append
+  to `claude-maxer/digest/papers-YYYY-MM-DD.md` in the vault.
 - **news-digest** — pull the top 10 Hacker News front-page stories via its
   public API (`hacker-news.firebaseio.com`), pick the 3 most interesting by
-  score/discussion, summarize via WebFetch, write a note to the Obsidian
-  vault. Source choice: HN was picked as the default over Reddit/lobste.rs/
+  score/discussion, summarize via WebFetch, append to
+  `claude-maxer/digest/news-YYYY-MM-DD.md`. Source choice: HN was picked as
+  the default over Reddit/lobste.rs/
   GitHub Trending because it needs no auth, has a stable public API, and is
   the standard broad-coverage source for "what's interesting in tech today."
   If that turns out to be the wrong fit, swap the source in the
@@ -226,6 +263,40 @@ PR** — never push to master directly. The iteration suffix keeps branch
 names unique when the same type recurs within one loop run. papers-digest
 and news-digest only write to the Obsidian vault, not the repo, so they
 need no PR.
+
+### Vault output convention
+
+Everything this loop generates lives **under `claude-maxer/`** in the vault
+— digests in `claude-maxer/digest/`, usage heartbeats in
+`claude-maxer/usage/`. Set 2026-08-11 at the user's request; it narrows the
+older "generated docs go to the vault root" preference, which still holds
+for one-off docs a human asked for. The seven root-level digest notes from
+before that were consolidated into `claude-maxer/digest/news-2026-08-11.md`
+and `papers-2026-08-11.md`.
+
+Two failure modes the digest prompts now name explicitly, both observed:
+
+- **The filename must end in `.md`.** A fire once wrote
+  `news-digest-2026-08-11` with no extension, so Obsidian didn't treat it
+  as a note and no wiki-link could reach it. The REST API happily serves it
+  anyway, and `GET /vault/<name>/` returns its *content* instead of a
+  listing — which makes an extensionless file look like a folder in a probe.
+- **zsh doesn't word-split unquoted expansions.** The Bash tool runs zsh, so
+  `for id in $ids` over ids captured from a previous command iterates *once*
+  with the whole string, building one URL full of spaces. Every HN fetch
+  comes back empty and reads like an API flake. Use `${=ids}`, a zsh array,
+  or do the fan-out in `python3`.
+
+### Not yet implemented: the vault-tasks drain
+
+A crontab comment claimed for a day that `run_maxer_work.sh` drains the
+vault's `Tasks.md` as priority-1 work. It never did — grep it for
+`Tasks.md` and you get nothing. The `vault-tasks` skill's own runner was
+deleted 2026-08-11 (the user is implementing the drain here instead), so
+**nothing drains that queue right now.** `skills/vault-tasks/vault_tasks.py`
+provides `pick`/`list`/`mark`; that skill's SKILL.md documents the contract
+the drain has to honor (commit direct to master in `/data/apps/myfollows`,
+one task per run, mark only on success).
 
 ## Inspecting / adjusting
 

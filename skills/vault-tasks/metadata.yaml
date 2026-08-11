@@ -1,4 +1,4 @@
 name: vault-tasks
-description: Local cron routine that reads undone items from the Obsidian vault's Tasks.md and implements them one at a time in /data/apps/myfollows, checking each off when done.
+description: Queue interface to the Obsidian vault's Tasks note — pick/list/mark undone items for unattended work in /data/apps/myfollows. Owns no schedule; claude-maxer drives it.
 scope: project
-tags: [automation, cron, obsidian, myfollows]
+tags: [automation, obsidian, myfollows, queue]

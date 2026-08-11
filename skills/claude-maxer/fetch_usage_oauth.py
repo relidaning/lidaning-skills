@@ -23,11 +23,15 @@ interactive session is ever required; a bare crontab entry can run this
 forever.
 
 Vault heartbeat: --vault-log appends one line per fetch to a daily note in
-the Obsidian vault (0_dev/AI/claude-maxer/usage-log-YYYY-MM-DD.md) via the
-Local REST API — a visible proof the background loop is alive. Token comes
-from $OBSIDIAN_MCP_TOKEN or is parsed out of ~/.zshrc.local (cron has no
-shell env). Vault errors (Obsidian closed, plugin off) only warn; the
-snapshot fetch still succeeds.
+the Obsidian vault (claude-maxer/usage/YYYY-MM-DD.md) via the Local REST
+API — a visible proof the background loop is alive. Each line carries the
+5h number plus what the loop was doing, so the note reads as "quota spent
+on X" rather than a bare percentage; 7d was dropped from the note on
+2026-08-11 (it moves too slowly to be worth a line every 15 minutes, and is
+still in the snapshot for check_usage.py's pro-rata gate). Token comes from
+$OBSIDIAN_MCP_TOKEN or is parsed out of ~/.zshrc.local (cron has no shell
+env). Vault errors (Obsidian closed, plugin off) only warn; the snapshot
+fetch still succeeds.
 
 Usage: fetch_usage_oauth.py [--no-write] [--raw] [--refresh] [--vault-log]
 Exit codes: 0 = snapshot written (or data printed), 2 = auth problem
@@ -101,13 +105,43 @@ def iso_to_epoch(ts):
         return None
 
 
-def _fmt_reset(epoch, long=False):
+def _fmt_reset(epoch):
     if not epoch:
         return "?"
-    return time.strftime("%m-%d %H:%M" if long else "%H:%M", time.localtime(epoch))
+    return time.strftime("%H:%M", time.localtime(epoch))
 
 
-def vault_log(rate_limits, scoped):
+ACTIVITY_PATH = os.path.expanduser("~/.claude/state/maxer_activity.json")
+# Beyond this, the last recorded activity is no longer what the current
+# quota reading reflects, so attributing it would be a lie. The loop's own
+# fires are ~2h apart and an iteration rarely exceeds a few minutes.
+ACTIVITY_MAX_AGE_S = 30 * 60
+
+
+def _activity_suffix():
+    """`, sonnet-5 'skill-audit ($0.42)'` — what the quota actually bought.
+
+    run_maxer_work.sh records each iteration here. Without it the note is a
+    column of percentages that can't answer the only question worth asking
+    of it: a window went to 100%, in exchange for what? Stale entries are
+    dropped rather than repeated, so an idle stretch doesn't re-attribute
+    one run's work to every 15-minute heartbeat after it.
+    """
+    try:
+        with open(ACTIVITY_PATH) as f:
+            act = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    if time.time() - (act.get("ts") or 0) > ACTIVITY_MAX_AGE_S:
+        return ""
+    note = (act.get("note") or "").strip()
+    if not note:
+        return ""
+    model = (act.get("model") or "").replace("claude-", "").strip()
+    return f", {model} '{note}'" if model else f", '{note}'"
+
+
+def vault_log(rate_limits):
     """Append a one-line usage entry to today's vault heartbeat note.
 
     Talks straight to Obsidian's Local REST API on localhost — deliberately
@@ -132,17 +166,11 @@ def vault_log(rate_limits, scoped):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "text/markdown"}
 
     five = rate_limits.get("five_hour", {})
-    seven = rate_limits.get("seven_day", {})
     line = (
         f"- {time.strftime('%H:%M')} — 5h **{five.get('used_percentage', '?')}%**"
         f" (resets {_fmt_reset(five.get('resets_at'))})"
-        f" · 7d **{seven.get('used_percentage', '?')}%**"
-        f" (resets {_fmt_reset(seven.get('resets_at'), long=True)})"
+        f"{_activity_suffix()}\n"
     )
-    line += "".join(
-        f" · {s['model'] or s['kind']} 7d **{s['percent']}%**" for s in scoped
-    )
-    line += "\n"
 
     # New day = new note: give it a heading before the first entry.
     try:
@@ -157,7 +185,8 @@ def vault_log(rate_limits, scoped):
         line = (
             f"# claude-maxer usage log — {time.strftime('%Y-%m-%d')}\n\n"
             f"Appended by `fetch_usage_oauth.py --vault-log` "
-            f"(cron, every 15 min).\n\n{line}"
+            f"(cron, every 15 min). Each line: 5h utilization, when it "
+            f"resets, and what the loop spent it on.\n\n{line}"
         )
 
     # POST /vault/<path> appends (Local REST API v4+), creating if missing.
@@ -317,7 +346,7 @@ def main():
 
     if args.vault_log:
         try:
-            note = vault_log(rate_limits, scoped)
+            note = vault_log(rate_limits)
             print(f"vault heartbeat appended to {note}", file=sys.stderr)
         except Exception as e:
             # Obsidian closed / plugin off / token moved — never fail the fetch.
