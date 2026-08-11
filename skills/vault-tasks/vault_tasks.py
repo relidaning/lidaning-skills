@@ -69,6 +69,16 @@ def is_list_item(line):
 
 def undone_tasks(content):
     """Yield (line_index, line) for each undone task, in file order."""
+    for i, line, kind in classify(content):
+        if kind == "task":
+            yield i, line
+
+
+def classify(content):
+    """Yield (line_index, line, kind) for every non-blank, non-heading line.
+
+    kind is "task", "done", or "continuation".
+    """
     prev_is_list_item = False
     for i, line in enumerate(content.splitlines()):
         s = line.strip()
@@ -77,12 +87,28 @@ def undone_tasks(content):
             continue
         if is_list_item(line):
             prev_is_list_item = True
-            if not is_done(line):
-                yield i, line
+            yield i, line, "done" if is_done(line) else "task"
             continue
         if prev_is_list_item:
-            continue  # wrapped continuation of the item above
-        yield i, line
+            # Wrapped continuation of the item above, not a task. Callers
+            # surface these: the rule is right for soft-wrapped entries but
+            # would silently swallow a genuine bare-prose task typed under a
+            # list item, so it must never fail invisibly.
+            yield i, line, "continuation"
+            continue
+        yield i, line, "task"
+
+
+def task_text(line):
+    """The task's prose, with any list marker and checkbox stripped.
+
+    `pick` emits this rather than the raw line: the text becomes the whole
+    brief handed to the worker, and `- [ ] ` in the middle of a prompt is
+    markup noise the worker has to see past. `mark` compares on this form
+    too, so it accepts either the raw line or the cleaned text.
+    """
+    s = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", line.strip())
+    return re.sub(r"^\[[ xX]?\]\s*", "", s).strip()
 
 
 def mark_done(line):
@@ -95,23 +121,34 @@ def mark_done(line):
 
 def cmd_pick():
     for _, line in undone_tasks(get_content()):
-        print(line.strip())
+        print(task_text(line))
         return 0
     return 1
 
 
 def cmd_list():
+    content = get_content()
     found = False
-    for i, line in undone_tasks(get_content()):
-        print(f"{i + 1}\t{line.strip()}")
+    for i, line in undone_tasks(content):
+        print(f"{i + 1}\t{task_text(line)}")
         found = True
+    skipped = [(i, l) for i, l, k in classify(content) if k == "continuation"]
+    if skipped:
+        print(
+            f"note: {len(skipped)} line(s) read as continuation text of the item "
+            f"above, not as tasks. If one is meant to be its own task, give it a "
+            f"'- ' prefix:",
+            file=sys.stderr,
+        )
+        for i, line in skipped:
+            print(f"  line {i + 1}: {line.strip()[:70]}", file=sys.stderr)
     return 0 if found else 1
 
 
 def cmd_mark(target):
     lines = get_content().splitlines()
     for i, line in undone_tasks("\n".join(lines)):
-        if line.strip() == target.strip():
+        if task_text(line) == task_text(target):
             lines[i] = mark_done(line)
             put_content("\n".join(lines) + "\n")
             return 0

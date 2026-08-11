@@ -41,6 +41,16 @@ export https_proxy="http://127.0.0.1:10808"
 
 REPO_DIR="/data/apps/lidaning-skills"
 SKILL_DIR="$REPO_DIR/skills/claude-maxer"
+# Priority-1 work: drain the vault's Tasks.md into the myfollows repo. This
+# is the fold-in a crontab comment claimed existed for a day before anyone
+# grepped for it — actually implemented 2026-08-11.
+VAULT_TASKS_DIR="$REPO_DIR/skills/vault-tasks"
+MYFOLLOWS_DIR="/data/apps/myfollows"
+# The Obsidian REST vars are interactive-shell-only, and split across two
+# files: the token in ~/.zshrc.local, the URL in ~/.zshrc. Sourcing the
+# former alone leaves the URL empty, so set it explicitly.
+[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+export OBSIDIAN_MCP_URL="${OBSIDIAN_MCP_URL:-http://127.0.0.1:27123/}"
 LOG_FILE="$HOME/.claude/state/claude-maxer.log.jsonl"
 # Read by fetch_usage_oauth.py --vault-log so the vault's usage note says
 # what each quota jump bought, instead of just how big it was.
@@ -53,16 +63,22 @@ DRY_RUN=false
 # appends, so this file covers every iteration of the current run only).
 : > /tmp/claude-maxer-last-run.log
 
-# Safety valves — real usage % can't be observed per-iteration (see above),
-# so these bound the loop instead of a token/cost figure. Next cron fire is
-# 5h after this one; MAX_MINUTES leaves headroom before then.
+# Safety valves. As of 2026-08-11 these are the *secondary* bound: the real
+# pacer is check_usage.py's ramped 5h ceiling, re-checked before every
+# iteration, which stops a fire once usage crosses the current hour's line.
+# These caps only catch the case where the ceiling is far away and a fire
+# would otherwise keep going.
+#
+# Retuned for hourly firing (was 8 iterations / 50 min at a 2h cadence): a
+# fire must finish well inside its own hour, and 25% of a window is not
+# worth 8 iterations.
 #
 # All four are env-overridable so a human can run one bounded iteration by
 # hand to test a change without spending a whole window on it, e.g.
 #   MAX_ITERATIONS=1 MAXER_BUDGET_USD=1 MAXER_FORCE_TYPE=news-digest ./run_maxer_work.sh
 # Cron sets none of them and gets the defaults.
-MAX_ITERATIONS="${MAX_ITERATIONS:-8}"
-MAX_MINUTES="${MAX_MINUTES:-50}"
+MAX_ITERATIONS="${MAX_ITERATIONS:-3}"
+MAX_MINUTES="${MAX_MINUTES:-40}"
 BUDGET_USD="${MAXER_BUDGET_USD:-3}"
 # Forcing a type bypasses the weighted draw AND its daily cap — it is a
 # testing hook, so it must be able to re-run a type that already hit its cap.
@@ -125,6 +141,12 @@ pick_work_type() {
 
 build_prompt() {
   case "$1" in
+    vault-task)
+      # $4 = the task text picked from the vault. Commits go straight to
+      # master with no PR gate — the user's explicit choice 2026-08-08,
+      # deliberately unlike the repo work types below.
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Repo: '"$MYFOLLOWS_DIR"'. A task from the Obsidian vault'"'"'s Tasks.md reads: "'"$4"'". Implement it in this repo: make the necessary code/UI changes, and run any existing lint/typecheck/build step for the touched area if one exists. Keep the change scoped to what this task describes — do not fold in unrelated cleanup. Before committing, check `git branch --show-current` and `git status`: commit to master, and if the checkout is on some other branch or carries unrelated uncommitted work from another process, stop and report that instead of committing. Commit with a descriptive message referencing the task. Do not push to any remote, and do not open a PR.'
+      ;;
     skill-audit)
       echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Run a SkillOpt-style quality pass: for each skill under skills/*, score Trigger Clarity (0-5) and Body Quality (0-5) against the criteria already documented in this repo'"'"'s CLAUDE.md. For any skill scoring below 8/10 total, make at most 4 bounded edits to its SKILL.md to raise the score, then re-score to confirm the edit actually helped (revert if it did not). If every skill already scores >= 8/10, say so and do nothing else. If you made edits: create a new branch named claude-maxer/skill-audit-'"$3"', commit the changes with a message summarizing before/after scores, and open a draft PR via gh describing what changed and why. Do not push to master directly.'
       ;;
@@ -206,22 +228,38 @@ while true; do
     break
   fi
 
+  VAULT_TASK=""
   if [[ -n "$FORCE_TYPE" ]]; then
     WORK_TYPE="$FORCE_TYPE"
-  elif ! WORK_TYPE="$(pick_work_type)"; then
-    log "stopped" "none" "every work type has hit its daily cap"
-    break
+  else
+    # Priority 1: an undone item in the vault's Tasks.md outranks every
+    # housekeeping type. `pick` exits 1 when the queue is empty, and can
+    # also fail outright if Obsidian is closed — both mean "fall through",
+    # never "abort the run", hence the swallowed status.
+    set +e
+    VAULT_TASK="$(python3 "$VAULT_TASKS_DIR/vault_tasks.py" pick 2>/dev/null)"
+    PICK_STATUS=$?
+    set -e
+    (( PICK_STATUS != 0 )) && VAULT_TASK=""
+    if [[ -n "$VAULT_TASK" ]]; then
+      WORK_TYPE="vault-task"
+    elif ! WORK_TYPE="$(pick_work_type)"; then
+      log "stopped" "none" "no vault task, and every work type is disabled or capped"
+      break
+    fi
   fi
   RUN_ID="$(date +%Y%m%d-%H%M%S)-i${ITER}"
-  PROMPT="$(build_prompt "$WORK_TYPE" "$ITER" "$RUN_ID")"
+  PROMPT="$(build_prompt "$WORK_TYPE" "$ITER" "$RUN_ID" "$VAULT_TASK")"
 
   if $DRY_RUN; then
     echo "[dry-run iter $ITER] would run work_type=$WORK_TYPE"
+    [[ -n "$VAULT_TASK" ]] && echo "[dry-run iter $ITER] vault task: $VAULT_TASK"
     echo "$PROMPT"
     continue
   fi
 
-  cd "$REPO_DIR"
+  # vault-task work lands in myfollows; everything else in this repo.
+  if [[ "$WORK_TYPE" == "vault-task" ]]; then cd "$MYFOLLOWS_DIR"; else cd "$REPO_DIR"; fi
   OUT_FILE="/tmp/claude-maxer-last-run.log"
   echo "=== iter $ITER ($WORK_TYPE) $(date -Iseconds) ===" >> "$OUT_FILE"
   set +e
@@ -237,6 +275,16 @@ while true; do
     # Round for the vault note only; the log keeps full precision.
     COST_FMT="$(printf '%.2f' "$COST" 2>/dev/null || echo "$COST")"
     record_activity "$WORK_TYPE (\$$COST_FMT)"
+    # Check the task off only after the work itself succeeded. A failed mark
+    # is logged distinctly: the code change landed but the vault still shows
+    # the item as undone, so the next fire would redo it.
+    if [[ "$WORK_TYPE" == "vault-task" ]]; then
+      if python3 "$VAULT_TASKS_DIR/vault_tasks.py" mark "$VAULT_TASK"; then
+        log "marked" "vault-task" "iter=$ITER $VAULT_TASK"
+      else
+        log "handled_but_unmarked" "vault-task" "iter=$ITER marking Tasks.md failed — $VAULT_TASK"
+      fi
+    fi
   else
     log "failed" "$WORK_TYPE" "iter=$ITER see $OUT_FILE"
     record_activity "$WORK_TYPE failed"

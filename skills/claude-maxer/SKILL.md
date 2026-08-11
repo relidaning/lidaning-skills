@@ -122,16 +122,42 @@ frozen snapshot.
 ### 3. Usage gate
 
 `skills/claude-maxer/check_usage.py` reads that snapshot and exits 0
-(proceed) or 1 (skip), printing its reasoning:
-- No snapshot yet, or unreadable → skip
-- `five_hour` or `seven_day` `used_percentage` >= 95 → skip
-- Otherwise → proceed, **regardless of the snapshot's age**
+(proceed) or 1 (skip), printing its reasoning. As of 2026-08-11 the 5h
+check is a **ramped ceiling**, not a flat threshold — this is the loop's
+real pacer:
 
-Age is deliberately not a gate: headless work never refreshes the snapshot
-(see caveat below), so gating on staleness would cap every loop at ~30
-minutes no matter what. If nothing else updates the cache mid-loop, it stays
-below the skip threshold for the whole run — the loop's iteration/wall-clock
-caps (below) are the real backstop, not this check.
+| elapsed in the 5h window | ceiling | effect |
+|---|---|---|
+| hour 0 | 0% | steady — no unattended work at all |
+| hour 1 | 25% | |
+| hour 2 | 50% | |
+| hour 3 | 75% | |
+| hour 4 | 95% | |
+
+Hour 0 is deliberately dead: right after a reset the whole window is still
+available and the user's own interactive work should get first claim. The
+table is `RAMP_BY_HOUR` — editing it repaces the whole loop.
+
+Because the caller re-checks the gate before **every** iteration, the
+ceiling also bounds a single fire: iterations run until usage crosses the
+current hour's line, then the loop stops. That is what keeps one fire to
+roughly one 25% step. It replaced a flat 95% gate that let one fire take 5h
+usage from 27% to 100% in ~40 minutes, after which everything skipped for
+four hours.
+
+7d stays a flat 95% — it spans a week, so an hourly ramp means nothing to
+it; it is a hard backstop, not a pacer.
+
+If the window's start can't be derived (the API omits `resets_at` for a
+window with no usage yet), the ceiling falls back to 25%. Without that the
+loop could deadlock: a never-opened window would read as hour 0, whose
+ceiling is 0, so nothing would run and nothing would open the window.
+
+- No snapshot yet, or unreadable → skip
+- Otherwise judged **regardless of the snapshot's age**. Age is deliberately
+  not a gate: headless work never refreshes the snapshot on its own (see
+  caveat below), so gating on staleness would cap every loop at ~30 minutes
+  no matter what. The caller refreshes it before each iteration.
 
 ### 4. Local cron (usage check + real work, looped)
 
@@ -212,6 +238,26 @@ in one run, logged as `"status": "failed"` in `claude-maxer.log.jsonl` with
 no real work done) — the loop's cost/iteration accounting still looked
 fine (`$0` spent) because auth failures don't reach the API metering, so
 this class of failure produces no cost signal to notice it by.
+
+## Work priority
+
+Every iteration asks for a vault task **first**:
+
+1. `vault_tasks.py pick` against the vault's `Tasks.md`. If it returns an
+   undone item, the iteration is a `vault-task`: implement it in
+   `/data/apps/myfollows`, commit **straight to master** (no branch, no PR —
+   the user's explicit choice 2026-08-08), then `mark` it. The mark runs only
+   after the work exits 0; a failed mark logs `handled_but_unmarked`, because
+   the code landed but the next fire would otherwise redo it.
+2. Otherwise fall through to the weighted housekeeping draw below.
+
+`pick` exiting nonzero — empty queue, or Obsidian closed — means "fall
+through", never "abort the run". Implemented 2026-08-11; a crontab comment
+claimed this existed for a day before anyone grepped for it.
+
+Because a `vault-task` iteration runs with `cwd=/data/apps/myfollows` while
+everything else runs in this repo, the loop picks its working directory per
+iteration rather than once at startup.
 
 ## The 5 work types
 
