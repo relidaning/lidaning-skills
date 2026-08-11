@@ -43,8 +43,8 @@ first** to understand what the user is working on. Look at:
 
 - `CLAUDE.md` — project overview and skills
 - `SESSION.md` — recent session goals and current state
-- `TODO.md` — what's planned or in progress
-- `MEMORIES.md` — user preferences
+- `.claude/TODO.md` — what's planned or in progress
+- `.claude/MEMORIES.md` — user preferences
 - `git log --oneline -10` — recent commits and what's been built
 - The current branch name
 
