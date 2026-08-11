@@ -5,9 +5,8 @@ description: >
   note, the status of Tasks.md processing, "vault-tasks", or unattended task
   work landing in /data/apps/myfollows. Reads and checks off undone items in
   the Obsidian vault's Tasks note via `vault_tasks.py pick|list|mark`. This
-  skill owns no schedule — report that claude-maxer is the scheduler, and
-  that the drain is not implemented there yet, rather than pointing at a
-  cron entry.
+  skill owns no schedule — report that claude-maxer runs the drain hourly as
+  its priority-1 work type, rather than pointing at a standalone cron entry.
 ---
 
 # vault-tasks
@@ -81,25 +80,17 @@ Do **not** re-add a second cron loop: two independent loops sharing one
 quota pool each pass the usage gate on their own while jointly exhausting
 the 5h window, which is exactly why the standalone entry died.
 
-**Current reality check** — as of 2026-08-11, `run_maxer_work.sh` has *no*
-reference to `Tasks.md`, `vault_tasks.py`, or `myfollows`, so nothing
-drains the queue automatically yet. A crontab comment claimed this fold-in
-existed for a day before anyone grepped for it; a comment is a claim, not
-evidence. Verify with `grep -n 'Tasks\.md' skills/claude-maxer/run_maxer_work.sh`
-before telling the user the queue is being processed.
-
-## What the drain needs to do
-
-For whoever implements it in `claude-maxer`:
-
-1. `pick` a task (exit 1 = queue empty, skip).
-2. Run it with `cwd=/data/apps/myfollows`, task text as the whole brief.
-3. Commit **directly to master**, no branch or PR — the user's explicit
-   choice on 2026-08-08, deliberately unlike claude-maxer's own
-   dep-audit/todo-triage work. Do not push to any remote.
-4. `mark` it only if step 2 exited 0.
-5. One task per run. Some entries (a full page redesign) can't be bounded
-   to a single slot, so batching risks leaving several half-done.
+**Current reality check** — the drain *is* implemented: `run_maxer_work.sh`
+picks a task with `vault_tasks.py pick`, runs it with `cwd=/data/apps/myfollows`,
+commits directly to master (no branch/PR — the user's explicit choice
+2026-08-08, unlike claude-maxer's own dep-audit/todo-triage work), and
+`mark`s it only on success. See claude-maxer's SKILL.md "Work priority"
+section for the authoritative description — this file doesn't duplicate it,
+to avoid the two drifting out of sync again. A crontab comment once claimed
+this fold-in existed for a day before it actually did; if this section ever
+looks stale, verify with
+`grep -n 'Tasks\.md' skills/claude-maxer/run_maxer_work.sh` rather than
+trusting either doc.
 
 Because commits land on master unreviewed, a bad unattended change ships
 without a gate. If that stops feeling safe, switch the prompt to the
