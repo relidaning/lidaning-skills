@@ -112,6 +112,7 @@ print(n)
 pick_work_type() {
   local pool=() t cap
   for t in "${TYPES[@]}"; do
+    (( ${WEIGHTS[$t]} == 0 )) && continue   # weight 0 = disabled
     cap="${DAILY_CAP[$t]:-0}"
     if (( cap > 0 )) && (( $(ran_today "$t") >= cap )); then
       continue
@@ -153,8 +154,14 @@ TYPES=(skill-audit todo-triage dep-audit papers-digest news-digest)
 # produce and near-worthless on repeat, so they are now both down-weighted
 # and hard-capped per day; repo work carries the load. The point was never to
 # spend less quota — it is to stop paying digest prices for duplicate output.
+#
+# 2026-08-11, later the same day: both digests DISABLED outright (weight 0)
+# at the user's request. Down-weighting was not enough — the output itself
+# was judged not worth any quota, duplicate or not. They stay in TYPES and
+# keep their prompts so MAXER_FORCE_TYPE can still run one by hand, and
+# re-enabling is a one-character change. Weight 0 = never drawn.
 declare -A WEIGHTS=(
-  [skill-audit]=3 [todo-triage]=3 [dep-audit]=2 [papers-digest]=1 [news-digest]=1
+  [skill-audit]=3 [todo-triage]=3 [dep-audit]=2 [papers-digest]=0 [news-digest]=0
 )
 # 0 = uncapped. Digests cap at one note per day each; the append-don't-
 # duplicate instruction in build_prompt is the second half of this fix.

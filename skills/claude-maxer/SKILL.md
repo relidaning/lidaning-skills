@@ -102,8 +102,11 @@ under `scoped_limits`), so `check_usage.py` needs no changes.
   reads it, dropping records older than 30 min so an idle stretch doesn't
   re-attribute one run's work to every later heartbeat. 7d was dropped from
   the note the same day — it moves too slowly to earn a line every 15
-  minutes, and is still in the snapshot for `check_usage.py`'s pro-rata gate — a human-visible proof the loop is alive, and a usage history
-  over the day. It talks to `127.0.0.1:27123` directly (proxy bypassed),
+  minutes, and is still in the snapshot, where `check_usage.py` reads it for
+  its 95% threshold. The note remains human-visible proof the loop is alive,
+  plus a usage history over the day.
+
+  It talks to `127.0.0.1:27123` directly (proxy bypassed),
   reading the token from `$OBSIDIAN_MCP_TOKEN` or parsing
   `~/.zshrc.local` under cron. Vault errors (Obsidian closed, plugin off)
   only print a `WARN` — the snapshot fetch still succeeds.
@@ -221,20 +224,27 @@ within scope. The `weight`/`cap` columns are `WEIGHTS` and `DAILY_CAP` in
 | skill-audit | 3 | — | draft PR |
 | todo-triage | 3 | — | draft PR |
 | dep-audit | 2 | — | draft PR |
-| papers-digest | 1 | 1 | vault note |
-| news-digest | 1 | 1 | vault note |
+| papers-digest | **0 — disabled** | 1 | vault note |
+| news-digest | **0 — disabled** | 1 | vault note |
 
-**Why the mix is weighted (retuned 2026-08-11).** It used to be a uniform
-draw over all five, which put 40% of every window into digests. The vault's
-own record (`claude-maxer/usage/2026-08-11.md`) showed the 06:00 window
-going 27% → 100% in ~40 minutes, and what the user could point at
-afterwards was a handful of digest notes — *seven* for the one day, several
-of them same-day duplicates, because every fire re-derived the day's digest
-from scratch. Digests are cheap to produce and near-worthless on repeat, so
-they are now down-weighted to ~20% combined *and* hard-capped at one note
-per type per day, with the prompts told to append to the existing day's note
-rather than create a `-2`/`-3` twin. The goal was never to spend less quota
-— it is to stop paying digest prices for duplicate output.
+**Both digests are disabled** (2026-08-11, user's request). Weight 0 means
+`pick_work_type()` never draws them, so scheduled fires now split
+30/30/20 across the three repo work types. They remain in `TYPES` with
+their prompts intact, so `MAXER_FORCE_TYPE=news-digest` still runs one by
+hand and re-enabling is a one-character change.
+
+**How it got here.** The draw used to be uniform over all five, putting 40%
+of every window into digests. The vault's own record
+(`claude-maxer/usage/2026-08-11.md`) showed the 06:00 window going 27% →
+100% in ~40 minutes, and what the user could point at afterwards was
+*seven* digest notes for the one day, several of them same-day duplicates,
+because every fire re-derived the day's digest from scratch. The first fix
+was down-weighting to ~20% combined plus a one-note-per-day cap and
+append-don't-duplicate prompts. That worked mechanically — a verified test
+run appended 3 genuinely new stories to the existing note — but the user's
+judgment was that the output isn't worth quota at any rate, duplicate or
+not, so the weights went to 0. Worth remembering when re-enabling is
+tempted: the problem was never the duplication, it was the value.
 
 - **skill-audit** — SkillOpt-style pass over `skills/*`: score trigger
   clarity + body quality per CLAUDE.md's criteria, bounded edits (≤4) for
