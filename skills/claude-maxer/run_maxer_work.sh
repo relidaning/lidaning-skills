@@ -56,8 +56,17 @@ DRY_RUN=false
 # Safety valves — real usage % can't be observed per-iteration (see above),
 # so these bound the loop instead of a token/cost figure. Next cron fire is
 # 5h after this one; MAX_MINUTES leaves headroom before then.
-MAX_ITERATIONS=8
-MAX_MINUTES=50
+#
+# All four are env-overridable so a human can run one bounded iteration by
+# hand to test a change without spending a whole window on it, e.g.
+#   MAX_ITERATIONS=1 MAXER_BUDGET_USD=1 MAXER_FORCE_TYPE=news-digest ./run_maxer_work.sh
+# Cron sets none of them and gets the defaults.
+MAX_ITERATIONS="${MAX_ITERATIONS:-8}"
+MAX_MINUTES="${MAX_MINUTES:-50}"
+BUDGET_USD="${MAXER_BUDGET_USD:-3}"
+# Forcing a type bypasses the weighted draw AND its daily cap — it is a
+# testing hook, so it must be able to re-run a type that already hit its cap.
+FORCE_TYPE="${MAXER_FORCE_TYPE:-}"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -125,10 +134,10 @@ build_prompt() {
       echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). For each Node subproject under skills/ that has a package.json (e.g. skills/model-switch, skills/rag-chroma), run `npm outdated` and `npm audit` (read-only, do not upgrade or auto-fix anything). Compare findings against the most recent report at docs/claude-maxer-dependency-report-*.md if one exists. Only if there is something new to report (newly outdated packages, new vulnerabilities) or no prior report exists: write/update a concise markdown report at docs/claude-maxer-dependency-report-'"$3"'.md, create a new branch named claude-maxer/dep-audit-'"$3"', commit it, and open a draft PR via gh with the summary in the PR description. If there is nothing new versus the last report, say so and do nothing else. Do not push to master directly, and never run npm install/update/audit fix.'
       ;;
     papers-digest)
-      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://huggingface.co/papers/trending, pick 2-3 trending papers, and for each fetch its abstract/summary content (via WebFetch on the paper page — do not attempt to download raw PDFs). Write a concise summary (what problem it solves, key idea, why it is notable) for each paper. Use the obsidian-local skill to write the note at exactly claude-maxer/digest/papers-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only papers it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. If every trending paper is already covered, say so and write nothing. Link back to the paper pages. This does not touch the git repo, so no branch or PR is needed.'
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://huggingface.co/papers/trending, pick 2-3 trending papers, and for each fetch its abstract/summary content (via WebFetch on the paper page — do not attempt to download raw PDFs). Write a concise summary (what problem it solves, key idea, why it is notable) for each paper. Use the obsidian-local skill to write the note at exactly claude-maxer/digest/papers-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only papers it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. Head the appended section with the current time only (e.g. "## 16:38"); never put an iteration number or fire label in a heading or in the prose — the note is per-day, not per-fire, and the label is wrong the moment another fire appends. If every trending paper is already covered, say so and write nothing. Link back to the paper pages. This does not touch the git repo, so no branch or PR is needed.'
       ;;
     news-digest)
-      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://hacker-news.firebaseio.com/v0/topstories.json, take the first 10 story ids, fetch each via https://hacker-news.firebaseio.com/v0/item/{id}.json, and pick the 3 most interesting ones by score/discussion volume. Note: fan-out loops over ids captured from a previous command must not use `for id in $ids` — the Bash tool runs zsh, which does not word-split unquoted parameter expansions, so that builds one URL containing spaces and every fetch comes back empty; use `${=ids}`, a zsh array, or do the fan-out in python3. For each story: fetch the linked article via WebFetch (skip Ask HN/Show HN self-posts with no external link, or fall back to just the HN discussion) and write a concise summary (what it is, why it is notable, key discussion point from the top comments if relevant). Use the obsidian-local skill to write the note at exactly claude-maxer/digest/news-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only stories it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. If every top story is already covered, say so and write nothing. Link back to both the article and the HN discussion thread. This does not touch the git repo, so no branch or PR is needed.'
+      echo 'You are running unattended as part of the claude-maxer scheduled routine (iteration '"$2"' of this run). Fetch https://hacker-news.firebaseio.com/v0/topstories.json, take the first 10 story ids, fetch each via https://hacker-news.firebaseio.com/v0/item/{id}.json, and pick the 3 most interesting ones by score/discussion volume. Note: fan-out loops over ids captured from a previous command must not use `for id in $ids` — the Bash tool runs zsh, which does not word-split unquoted parameter expansions, so that builds one URL containing spaces and every fetch comes back empty; use `${=ids}`, a zsh array, or do the fan-out in python3. For each story: fetch the linked article via WebFetch (skip Ask HN/Show HN self-posts with no external link, or fall back to just the HN discussion) and write a concise summary (what it is, why it is notable, key discussion point from the top comments if relevant). Use the obsidian-local skill to write the note at exactly claude-maxer/digest/news-'"$(date +%F)"'.md — that literal path, including the .md extension. FIRST read that note if it exists: if it does, pick only stories it does not already cover and APPEND them to it; never create a -2/-3 suffixed duplicate, and never write an extensionless file. Head the appended section with the current time only (e.g. "## 16:38"); never put an iteration number or fire label in a heading or in the prose — the note is per-day, not per-fire, and the label is wrong the moment another fire appends. If every top story is already covered, say so and write nothing. Link back to both the article and the HN discussion thread. This does not touch the git repo, so no branch or PR is needed.'
       ;;
   esac
 }
@@ -190,7 +199,9 @@ while true; do
     break
   fi
 
-  if ! WORK_TYPE="$(pick_work_type)"; then
+  if [[ -n "$FORCE_TYPE" ]]; then
+    WORK_TYPE="$FORCE_TYPE"
+  elif ! WORK_TYPE="$(pick_work_type)"; then
     log "stopped" "none" "every work type has hit its daily cap"
     break
   fi
@@ -207,7 +218,7 @@ while true; do
   OUT_FILE="/tmp/claude-maxer-last-run.log"
   echo "=== iter $ITER ($WORK_TYPE) $(date -Iseconds) ===" >> "$OUT_FILE"
   set +e
-  RESULT_JSON="$(claude -p "$PROMPT" --model "$MODEL" --output-format json --max-budget-usd 3 --dangerously-skip-permissions 2>>"$OUT_FILE")"
+  RESULT_JSON="$(claude -p "$PROMPT" --model "$MODEL" --output-format json --max-budget-usd "$BUDGET_USD" --dangerously-skip-permissions 2>>"$OUT_FILE")"
   CALL_STATUS=$?
   set -e
   echo "$RESULT_JSON" >> "$OUT_FILE"
@@ -216,7 +227,9 @@ while true; do
     COST="$(echo "$RESULT_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total_cost_usd', 0))" 2>/dev/null || echo 0)"
     TOTAL_COST="$(python3 -c "print($TOTAL_COST + $COST)" 2>/dev/null || echo "$TOTAL_COST")"
     log "ran" "$WORK_TYPE" "iter=$ITER cost_usd=$COST cumulative_usd=$TOTAL_COST"
-    record_activity "$WORK_TYPE (\$$COST)"
+    # Round for the vault note only; the log keeps full precision.
+    COST_FMT="$(printf '%.2f' "$COST" 2>/dev/null || echo "$COST")"
+    record_activity "$WORK_TYPE (\$$COST_FMT)"
   else
     log "failed" "$WORK_TYPE" "iter=$ITER see $OUT_FILE"
     record_activity "$WORK_TYPE failed"
