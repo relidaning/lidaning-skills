@@ -163,12 +163,12 @@ ceiling is 0, so nothing would run and nothing would open the window.
 
 A real OS crontab entry (not the session-scoped `CronCreate` — that only
 fires while a Claude Code REPL is idle, unreliable for 1am/6am with nothing
-open) drives this. Cadence was tightened from an hourly-offset schedule to
-every 30 minutes on 2026-08-11 (a gated fire that skips costs one metadata
-call, not quota, and the old 2h gap meant a window could reset unused):
+open) drives this. Cadence is hourly as of the 2026-08-11 pacing rebuild
+(`4a506db2`), paired with the ramped ceiling above so a single fire is
+capped to roughly one ramp step instead of a fixed time gap:
 
 ```
-*/30 * * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh >> /tmp/claude-maxer-cron.log 2>&1
+2 * * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh >> /tmp/claude-maxer-cron.log 2>&1
 ```
 
 Check `crontab -l` for the current state (enabled/disabled and cadence both
@@ -193,9 +193,9 @@ change over time — this file is documentation, not the source of truth).
 
 **Loop stop conditions** (whichever hits first):
 - usage gate returns skip (missing snapshot, or either window >= 95%)
-- `MAX_ITERATIONS` (8) reached
-- `MAX_MINUTES` (50) elapsed — leaves headroom before the next cron fire,
-  which is ~5h later
+- `MAX_ITERATIONS` (3, env-overridable) reached
+- `MAX_MINUTES` (40, env-overridable) elapsed — leaves headroom before the
+  next cron fire, which is ~1h later
 
 **Important caveat (now mitigated):** `claude -p` (any `--output-format`)
 never includes `rate_limits` in its output — that field only exists in the
@@ -343,24 +343,24 @@ Two failure modes the digest prompts now name explicitly, both observed:
   comes back empty and reads like an API flake. Use `${=ids}`, a zsh array,
   or do the fan-out in `python3`.
 
-### Not yet implemented: the vault-tasks drain
+### History: the vault-tasks drain
 
-A crontab comment claimed for a day that `run_maxer_work.sh` drains the
-vault's `Tasks.md` as priority-1 work. It never did — grep it for
-`Tasks.md` and you get nothing. The `vault-tasks` skill's own runner was
-deleted 2026-08-11 (the user is implementing the drain here instead), so
-**nothing drains that queue right now.** `skills/vault-tasks/vault_tasks.py`
-provides `pick`/`list`/`mark`; that skill's SKILL.md documents the contract
-the drain has to honor (commit direct to master in `/data/apps/myfollows`,
-one task per run, mark only on success).
+A crontab comment once claimed for a day that `run_maxer_work.sh` drains
+the vault's `Tasks.md` as priority-1 work before it actually did — grepping
+the script for `Tasks.md` came back empty. That gap is closed: the "Work
+priority" section above (`vault_tasks.py pick` first, implement in
+`/data/apps/myfollows`, mark on success) has been live since 2026-08-11.
+Kept here as a reminder that a crontab comment or doc claim is not evidence
+a mechanism exists — verify against the script before trusting it.
 
 ## Inspecting / adjusting
 
 - Live routine: `schedule` skill, or https://claude.ai/code/routines
   (deletion also goes through that URL — can't delete via API)
 - Local cron: `crontab -l` / `crontab -e` (work loop enabled since
-  2026-08-10 21:22 at `*/30 * * * *`, unless later commented out — plus the
-  15-min usage-snapshot refresh; its last run's output is in
+  2026-08-10 21:22, hourly at `2 * * * *` since the 2026-08-11 pacing
+  rebuild, unless later commented out — plus the 15-min usage-snapshot
+  refresh; its last run's output is in
   `/tmp/claude-maxer-usage-fetch.log`)
 - Run history: `~/.claude/state/claude-maxer.log.jsonl`
 - Last headless run's full output: `/tmp/claude-maxer-last-run.log`
