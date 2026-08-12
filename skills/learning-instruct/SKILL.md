@@ -38,8 +38,37 @@ the user where to store the materials — vault or local project.
 
 ### Phase 1: Goal
 
-If no goal is active (check with coding-orchestrate), **read the project
-first** to understand what the user is working on. Look at:
+If no goal is active (check with coding-orchestrate), **check besmart before
+reading the project**. besmart (`/data/apps/besmart`) is a separate app with
+its own "Study Plans" feature; when it's reachable it is the resource this
+skill draws curricula from — see "BeSmart integration" below for the full
+data flow. List its incomplete plans:
+
+```bash
+python3 skills/learning-instruct/besmart_sync.py list
+```
+
+If the command errors (besmart's container isn't running, `docker`/`pyjwt`
+unavailable, etc.), skip silently to the project-read flow below — besmart is
+an enhancement, never a hard dependency.
+
+If plans come back, present them (name, description, date range) and ask
+whether to use one as this session's goal, or set a goal that isn't on
+besmart at all. Don't auto-pick — let the user choose.
+
+- **User picks a besmart plan** — generate GOAL.md from the plan's
+  name/description, record `**BeSmart plan:** #<id>` in it (see
+  [goal.md](goal.md)). If the plan already has tasks, treat them as the
+  Phase 2 breakdown (present for confirmation, same as any composition); if
+  it has none, run Phase 2 normally and push the resulting parts to besmart
+  as tasks afterward.
+- **User declines / no plans exist** — fall back to reading the project
+  first, below. If the resulting goal is genuinely new, also create it in
+  besmart (`besmart_sync.py create-plan ...`) so besmart stays the single
+  place all curricula — past and present — are listed, then record the
+  returned id in GOAL.md the same way.
+
+**Read the project first** to understand what the user is working on. Look at:
 
 - `CLAUDE.md` — project overview and skills
 - `SESSION.md` — recent session goals and current state
@@ -105,6 +134,27 @@ compositions.md content and hand to coding-orchestrate.
 Present the breakdown to the user. Let them reorder, add, or remove parts
 before proceeding.
 
+If GOAL.md has a `BeSmart plan`, once the breakdown is locked in, push every
+non-strikethrough part that doesn't already carry a `(besmart task #N)` tag
+as a parent task:
+
+```bash
+python3 skills/learning-instruct/besmart_sync.py create-task <plan_id> "<part name>" "<part summary>" <planned_start> <planned_end>
+```
+
+Tag the part in compositions.md with the returned task id (see
+[compositions.md](compositions.md)). besmart's `plan_tasks` are a WBS tree —
+for parts substantial enough to benefit from it, also push a leaf breakdown
+(install/setup → concept → demo → interview question is a reliable default
+shape) as children of that parent:
+
+```bash
+python3 skills/learning-instruct/besmart_sync.py create-task <plan_id> "<leaf name>" "<leaf detail>" <planned_start> <planned_end> --parent-task-id <parent_id>
+```
+
+Tag each leaf with `(leaf #N)`. Run `besmart_sync.py tree <plan_id>` to
+confirm the live tree matches compositions.md before moving on.
+
 ### Phase 3: Teach
 
 Work through each composition part one at a time. For each part:
@@ -122,7 +172,13 @@ Work through each composition part one at a time. For each part:
    subtopic listed in the compositions breakdown? Did you miss any edge
    cases, variants, or "what you can't do" items? Go back and fill gaps
 5. Mark the part as done only when understanding is demonstrated AND all
-   subtopics are covered
+   subtopics are covered. besmart only lets **leaves** carry completion
+   state — a parent's checkmark is derived from its children, not settable
+   directly. So: as each `(leaf #N)`-tagged sub-item is covered, run
+   `besmart_sync.py complete-task <plan_id> <leaf_id>` right then, not
+   batched to the end of the part. If the part has no leaf breakdown (just a
+   `(besmart task #N)` tag on the part itself), complete that task directly
+   once the whole part is done. Don't wait for Phase 4 (see [steps.md](steps.md))
 
 Hand steps.md updates to coding-orchestrate as progress is made.
 
@@ -173,8 +229,63 @@ After all parts are taught, run a comprehensive evaluation:
 3. Score each composition area: mastered / proficient / needs work
 4. Generate findings for steps.md under an Evaluation section
 5. Recommend which parts to revisit and how to strengthen them
+6. If GOAL.md has a `BeSmart plan` and every part is done, run
+   `besmart_sync.py complete-plan <plan_id>` so the plan shows complete in
+   besmart too
 
 Hand all evaluation output to coding-orchestrate for recording.
+
+## BeSmart integration
+
+[besmart](/data/apps/besmart) is a separate personal productivity app (Node/
+TypeScript, port 5090) with its own "Study Plans" feature. As of the plan
+module's WBS rewrite, `plan_tasks` is a tree (`parent_task_id`,
+`sort_order`), not a flat list — this skill treats besmart as the **plan
+resource** — the place curricula are listed as a work-breakdown structure
+and progress is visible on a dashboard/streak — while this skill remains the
+**teaching engine**: it generates the actual step breakdown, tutorials,
+quizzes, and the living subject reference that besmart itself has no notion
+of. Neither app owns the other; they're linked per-goal by ids.
+
+**Data flow:**
+- besmart `study_plans` row ↔ this skill's GOAL.md (linked via `BeSmart plan: #id`)
+- besmart `plan_tasks` **parent** rows ↔ this skill's compositions.md parts
+  (linked via `(besmart task #id)` tags)
+- besmart `plan_tasks` **leaf** rows, when a part gets one, ↔ compositions.md
+  sub-items (linked via `(leaf #id)` tags) — install/concept/demo/interview-
+  question is the default shape for a leaf breakdown, but isn't mandatory for
+  every part
+- Only leaves carry completion state in besmart; a parent's checkmark is
+  derived client-side from whether every leaf descendant is done. So Phase 3
+  calls `complete-task` on the leaf id as each sub-step is covered (or on the
+  part id directly, for parts with no leaf breakdown) — never on a parent
+  that has children
+- All parts done (Phase 4) → `complete-plan` → besmart plan flips done
+- The rich content (Subject.md, steps.md, quizzes, issues) never lives in
+  besmart — it stays in this skill's usual output (vault or local project).
+  besmart only ever sees task names, descriptions, tree structure, and
+  completion state.
+
+**The bridge script:** `skills/learning-instruct/besmart_sync.py` — a CLI
+wrapping besmart's `/api/plans` HTTP API. It mints its own JWT at call time
+(reads `JWT_SECRET` from the running `besmart-besmart-1` container via
+`docker exec`, falling back to parsing besmart's `docker-compose.yml` — never
+hardcoded in this repo) so no credential setup is needed. Subcommands: `list
+[--all]`, `plan <id>`, `tree <id>` (human-readable WBS outline), `create-plan`,
+`update-plan`, `create-task [--parent-task-id]`, `update-task`,
+`complete-task`, `complete-plan`, `delete-task` (cascades to descendants),
+`delete-plan`, `indent-task`, `outdent-task`, `move-task <up|down>`.
+`update-plan`/`update-task` only send the fields you pass (e.g. rescheduling
+dates without touching completion state). All output JSON on stdout except
+`tree`. Override `BESMART_URL`, `BESMART_USER_ID`, `BESMART_EMAIL`,
+`BESMART_CONTAINER`, or `BESMART_JWT_SECRET` via env if the defaults (this
+user's besmart instance, `http://127.0.0.1:5090`) don't apply.
+
+**Never a hard dependency** — every besmart call in this skill is best-effort.
+If besmart isn't running, `docker` isn't reachable, or the script errors for
+any reason, fall back silently to the plain (no-besmart) flow described in
+each phase above. A learning track with no `BeSmart plan` line in GOAL.md
+works exactly as it did before this integration existed.
 
 ## Rules
 
@@ -218,6 +329,10 @@ Hand all evaluation output to coding-orchestrate for recording.
   blockquote explaining what they missed and why. Do not wait for the Phase 4
   evaluation. If Obsidian is reachable, write the updated file to the vault
   right away so the note reflects the current state of the conversation
+- **BeSmart sync is best-effort, never blocking** — a failed or unavailable
+  `besmart_sync.py` call is a skip, not an error to surface loudly or retry.
+  Teaching proceeds regardless; besmart is a convenience layer on top, not a
+  dependency of this skill's core workflow
 
 ## Additional resources
 
@@ -227,3 +342,5 @@ Hand all evaluation output to coding-orchestrate for recording.
 - For subject reference format, see [subject.md](subject.md)
 - For issue log format, see [issues.md](issues.md)
 - For documentation ingestion format, see [documentations.md](documentations.md)
+- For the besmart bridge script and data flow, see "BeSmart integration"
+  above and [besmart_sync.py](besmart_sync.py)

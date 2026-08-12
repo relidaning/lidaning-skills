@@ -129,6 +129,15 @@ by side.
 - **Recommendations are actionable** — "Study more" is useless. "Rebuild the
   generic `Promise.all` type from scratch" is concrete.
 - **Mark progress clearly** — each part is `done`, `in progress`, or `not started`
+- **Complete the linked besmart task on mastery** — besmart's `plan_tasks`
+  are a WBS tree; only leaves carry completion state (a parent's checkmark
+  is derived from its children). As each `(leaf #N)`-tagged sub-item is
+  covered, immediately run `besmart_sync.py complete-task <plan_id>
+  <leaf_id>` — don't wait for the whole part. For a part with no leaf
+  breakdown, complete its `(besmart task #N)` id directly once the part is
+  done. When every part in the plan is done, also run `besmart_sync.py
+  complete-plan <plan_id>`. Don't batch any of this for Phase 4 — besmart's
+  dashboard/streak should reflect progress as it happens
 - **Update as you teach** — don't batch the write for the end. After each
   concept, add it to steps.md while it's fresh. The user can review at any
   point and see current progress.

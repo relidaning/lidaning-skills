@@ -14,10 +14,20 @@ codebase
 **Background:** Comfortable with basic TypeScript — interfaces, unions,
 narrowing. Never used generics beyond `Array<T>`.
 **Date set:** 2026-05-16
+**BeSmart plan:** #31
 ```
+
+`BeSmart plan` is optional — only present when this goal was sourced from, or
+pushed to, a besmart study plan (see "BeSmart integration" in SKILL.md). Its
+value is the `study_plans.id` that Phase 3/4 write completions back to. Omit
+the line entirely for goals with no besmart plan.
 
 ## Rules
 
+- **Check besmart first** — before scanning the project or asking the user,
+  list besmart's incomplete study plans (`besmart_sync.py list`) and offer
+  them as candidate goals. Fall back to reading the project only if the user
+  declines or none exist. See "BeSmart integration" in SKILL.md.
 - **Read the project first** — before asking the user what they want to learn,
   scan CLAUDE.md, SESSION.md, TODO.md, MEMORIES.md, and recent git history.
   Form a best guess so the user can confirm rather than type from scratch.

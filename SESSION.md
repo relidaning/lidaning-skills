@@ -1,5 +1,8 @@
 # Sessions
 
+## 2026-08-12 — Disabled claude-maxer's unattended cron, deleted .claude/TODO.md, committed pending auto-run logs
+User asked to find and disable the source of "meaningless" unattended tasks and delete `.claude/TODO.md`; traced it to claude-maxer's hourly `run_maxer_work.sh` crontab entry (which drains the vault's Tasks.md plus proposes other work) and commented it out, leaving usage-polling entries untouched. User then clarified the vault's Tasks note is their *only* authoritative task source — saved as a standing memory (`feedback_task_source_of_truth`) so `.claude/TODO.md`/ad-hoc task tracking isn't recreated. Also committed and pushed unrelated pre-existing uncommitted SESSION.md changes from earlier automated claude-maxer runs that day, after confirming with the user that nothing from this conversation itself was git-trackable (crontab edits live outside the repo; `.claude/` is gitignored).
+
 ## 2026-08-12 — TODO-triage iteration 2 (13:02 batch): nothing safe to implement, no branch/PR (`e92b6385`)
 Claude-maxer TODO-triage run (branch would have been `claude-maxer/todo-triage-20260812-130256-i2`), same 13:02 batch as iteration 1 (`6dabe885`, logged directly below) and reaching the same conclusion independently. Checked `.claude/TODO.md` plus open branches/PRs first; the two prior `todo-triage-*` branches had zero commits ahead of master (already merged, items already checked off). All four remaining unchecked items ("test english-practice multi-turn," "test coding-orchestrate readme.md component," "polish english-practice correction format," "consider an ADR") are vague/manual-testing/product-judgment tasks the run instructions explicitly exclude — made no edits, opened no branch, no PR.
 
