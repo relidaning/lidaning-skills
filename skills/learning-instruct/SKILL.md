@@ -1,9 +1,14 @@
 ---
 name: learning-instruct
 description: >
-  Activate when user says "I want to learn X", "teach me X", "help me
-  understand X", "study plan for X", or invokes /learning-instruct.
-  Structured tutor: assess level → set goals → break topics → teach → evaluate.
+  Activate when user wants to learn, study, or find tutorials on a topic or
+  skill — phrases like "I want to learn X", "help me learn X", "teach me X",
+  "help me understand X", "study plan for X", "study X", "any tutorials on
+  X" — or invokes /learning-instruct. Do not activate for "study"/"review"
+  meaning examine or inspect (e.g. "study this log/code/output", a database
+  table named study_plans) — that's investigation, not a request to be
+  taught. Structured tutor: assess level → set goals → break topics → teach
+  → evaluate.
 ---
 
 ## Overview
