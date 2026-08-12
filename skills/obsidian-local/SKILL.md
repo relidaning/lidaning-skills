@@ -28,16 +28,17 @@ Obsidian must be running with the Local REST API plugin enabled.
 
 | Tool | Purpose |
 |---|---|
-| `obsidian_get_note` | Read a note by vault-relative path |
-| `obsidian_write_note` | Create or overwrite a note |
-| `obsidian_patch_note` | Edit a section (heading, block, frontmatter) in place |
-| `obsidian_append_to_note` | Append content to a note |
-| `obsidian_search_notes` | Search by text or JSONLogic predicate |
-| `obsidian_list_notes` | List files and directories |
-| `obsidian_list_tags` | List all tags with usage counts |
-| `obsidian_manage_frontmatter` | Get/set/delete frontmatter fields |
-| `obsidian_delete_note` | Permanently delete a note |
-| `obsidian_open_in_ui` | Open a note in the Obsidian app |
+| `vault_read` | Read a note by vault-relative path (pass `target`/`targetType` for one heading/block/frontmatter key) |
+| `vault_write` | Create or overwrite a note |
+| `vault_patch` | Edit a section (heading, block) in place — also how frontmatter fields are get/set/deleted (`targetType: frontmatter`) |
+| `vault_append` | Append content to a note |
+| `search_query` | JsonLogic query over note metadata (tags, frontmatter, path glob/regexp) |
+| `search_simple` | Full-text search with relevance scoring |
+| `vault_list` | List files and directories |
+| `tag_list` | List all tags with usage counts |
+| `vault_get_document_map` | Discover a note's headings/blocks before patching |
+| `vault_delete` | Permanently delete a note |
+| `open_file` | Open a note in the Obsidian app |
 
 ### Direct REST API (fallback)
 
@@ -58,25 +59,25 @@ Endpoints: `GET /vault/` (list), `GET /vault/<path>` (read),
 ### Search notes
 
 1. **If RAG is available** (`rag_search` tool present): call `rag_search(query, k=10)` first — it returns semantic matches with vault-relative paths and snippets. Use those paths to read full notes as needed.
-2. If RAG is unavailable or returns no useful results, try `obsidian_search_notes` with text or JSONLogic mode.
+2. If RAG is unavailable or returns no useful results, try `search_simple` (text) or `search_query` (JSONLogic).
 3. If that 404s, fall back to grepping via direct REST API reads.
 4. Present matching paths and snippets.
 
 ### Read a note
 
-`obsidian_get_note("path/to/note.md")` — returns full markdown body.
+`vault_read("path/to/note.md")` — returns full markdown body.
 
 ### Create a note
 
-`obsidian_write_note` with path and content. Creates parent directories as needed.
+`vault_write` with path and content. Creates parent directories as needed.
 Or `PUT /vault/path%2Fto%2Fnote.md` via REST API.
 
 ### Update a note
 
-- Whole file: `obsidian_write_note` (overwrite)
-- Section edit: `obsidian_patch_note` (heading/block/frontmatter)
-- Append: `obsidian_append_to_note`
-- Frontmatter only: `obsidian_manage_frontmatter`
+- Whole file: `vault_write` (overwrite)
+- Section edit: `vault_patch` (heading/block/frontmatter)
+- Append: `vault_append`
+- Frontmatter only: `vault_patch` with `targetType: frontmatter`
 
 New content added to a note (a create, a write, or an append — e.g. a word
 pasted into a vocab log) is headed by the current date as an H1, `# YYYY-MM-DD`,
@@ -86,11 +87,11 @@ new content under that existing heading instead of adding a duplicate one.
 
 ### Delete a note
 
-`obsidian_delete_note("path/to/note.md")` — irreversible, confirms with user first.
+`vault_delete("path/to/note.md")` — irreversible, confirms with user first.
 
 ## Rules
 
-- **RAG first for search** — if `rag_search` is available, always try it before `obsidian_search_notes`; RAG gives semantic matches across the whole vault without requiring an exact path
+- **RAG first for search** — if `rag_search` is available, always try it before `search_simple`/`search_query`; RAG gives semantic matches across the whole vault without requiring an exact path
 - **Search before read** — if the user doesn't know the exact path, search first
 - **MCP first, REST fallback** — prefer MCP tools; fall back to direct curl when they 404
 - **Self-signed cert** — Obsidian uses self-signed TLS. Use `-k` with curl
