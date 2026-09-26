@@ -88,8 +88,8 @@ under `scoped_limits`), so `check_usage.py` needs no changes.
   the usage endpoint is metadata-only — it does not consume quota or open
   the 5h window.
 - **Vault heartbeat (`--vault-log`):** each fetch appends one line to a
-  daily note at `claude-maxer/usage/YYYY-MM-DD.md` via Obsidian's Local
-  REST API. Format as of 2026-08-11:
+  daily note at `claude-maxer/usage/YYYY-MM-DD.md` via the headless
+  obsidian-vault MCP container. Format as of 2026-08-11:
 
   ```
   - 08:30 — 5h **100%** (resets 10:59), sonnet-5 'skill-audit ($0.42)'
@@ -106,10 +106,13 @@ under `scoped_limits`), so `check_usage.py` needs no changes.
   its 95% threshold. The note remains human-visible proof the loop is alive,
   plus a usage history over the day.
 
-  It talks to `127.0.0.1:27123` directly (proxy bypassed),
-  reading the token from `$OBSIDIAN_MCP_TOKEN` or parsing
-  `~/.zshrc.local` under cron. Vault errors (Obsidian closed, plugin off)
-  only print a `WARN` — the snapshot fetch still succeeds.
+  It calls the container at `$OBSIDIAN_MCP_URL` (default
+  `127.0.0.1:27125`, proxy bypassed) through
+  `obsidian-local/scripts/vault_mcp.py`, so the Obsidian app need not run
+  and no token is needed. Until 2026-09-26 it used the app's REST API on
+  27123 and silently stopped logging whenever the app was closed. Vault
+  errors (container down and not restartable) only print a `WARN` — the
+  snapshot fetch still succeeds.
 - **Proxy:** uses `$https_proxy`/`$http_proxy`, defaulting to
   `http://127.0.0.1:10808` (same xray requirement as `claude -p`).
 - **Debugging:** `--raw` dumps the full API response; `--no-write` prints
@@ -251,7 +254,7 @@ Every iteration asks for a vault task **first**:
    the code landed but the next fire would otherwise redo it.
 2. Otherwise fall through to the weighted housekeeping draw below.
 
-`pick` exiting nonzero — empty queue, or Obsidian closed — means "fall
+`pick` exiting nonzero — empty queue, or vault container unreachable — means "fall
 through", never "abort the run". Implemented 2026-08-11; a crontab comment
 claimed this existed for a day before anyone grepped for it.
 

@@ -20,23 +20,15 @@ work in `/data/apps/myfollows`. It reads undone items and checks them off.
 | | |
 |---|---|
 | Note | `Tasks.md` at the vault root — `[[Tasks]]` |
-| Transport | Obsidian Local REST API, `${OBSIDIAN_MCP_URL%/}/vault/Tasks.md` |
+| Transport | Headless obsidian-vault MCP container at `$OBSIDIAN_MCP_URL` (default `http://127.0.0.1:27125`), via `obsidian-local/scripts/vault_mcp.py` |
 | Override | `VAULT_TASKS_PATH` env var, if the note ever moves |
 
-`vault_tasks.py` talks to the REST API directly rather than through the
-`mcp__obsidian__*` tools, because an unattended caller has no MCP session.
-Two env gotchas it already handles, both of which bit earlier versions:
-`OBSIDIAN_MCP_URL` carries a trailing slash (naive appending gives a `//`
-path the API 404s on), and localhost traffic must bypass `http_proxy`.
-
-Env vars are interactive-shell-only — the token lives in `~/.zshrc.local`,
-the URL in `~/.zshrc`, and sourcing `~/.zshrc.local` alone leaves the URL
-empty. An unattended caller must set both:
-
-```bash
-source "$HOME/.zshrc.local"                      # OBSIDIAN_MCP_TOKEN
-export OBSIDIAN_MCP_URL="http://127.0.0.1:27123/"
-```
+`vault_tasks.py` calls the container over HTTP itself rather than through
+Claude's `mcp__obsidian-vault__*` tools, because an unattended caller has no
+MCP session. The Obsidian app need not run, and no token is needed. Cron
+doesn't source `~/.zshrc`, so the default URL applies there; the client
+starts the container via `vault-mcp.sh ensure` if it's down. It keeps the
+note's frontmatter across rewrites.
 
 ## CLI
 

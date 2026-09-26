@@ -172,7 +172,7 @@ aren't loaded):
 - **Note shape**: YAML frontmatter (`arxiv`, `title`, `authors`, `published`,
   `fetched`, `tags`), then the summary sections, then a **Links** section
   with the arXiv abs URL and the Nextcloud path `papers/<filename>.pdf`.
-- If the vault is unreachable (Obsidian not running / REST API down), keep
+- If the vault is unreachable (the obsidian-vault container is down and `vault-mcp.sh ensure` fails), keep
   going — report that the note wasn't written, don't retry endlessly.
 
 ## Rules

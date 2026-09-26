@@ -20,8 +20,8 @@ skill, which owns the recording layer and knows where to persist it.
 
 For local project storage, this skill does **not** write files directly — it
 generates content and passes it to coding-orchestrate for storage. The one
-exception is the vault: when Obsidian is reachable, this skill writes subject
-files there directly via the REST API rather than routing through
+exception is the vault: when the vault is reachable, this skill writes subject
+files there directly via the obsidian-vault MCP server rather than routing through
 coding-orchestrate (see "Storage location" below). Before handing off local
 content, it detects whether a notes MCP (like Obsidian) is connected and asks
 the user where to store the materials — vault or local project.
@@ -118,26 +118,22 @@ Let the user correct. This level drives the depth and pace of Phase 3.
 
 #### Storage location
 
-Once the goal and level are set, check whether Obsidian is reachable. Probe it
-silently using the env vars defined in the obsidian-local skill (`$OBSIDIAN_MCP_URL`
-and `$OBSIDIAN_MCP_TOKEN`):
+Once the goal and level are set, check whether the vault is reachable. It's
+served by the headless obsidian-vault MCP container (see the obsidian-local
+skill), so the Obsidian app does not need to be running. Probe it silently:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" \
-  "${OBSIDIAN_MCP_URL%/}/vault/"
+/data/apps/lidaning-skills/skills/obsidian-local/scripts/vault-mcp.sh ensure >/dev/null && echo ok
 ```
 
-(`$OBSIDIAN_MCP_URL` may have a trailing slash — always strip it with
-`${OBSIDIAN_MCP_URL%/}` before appending a path, or the API returns 404 on
-the resulting `//` and Obsidian looks unreachable when it isn't.)
-
-- **Obsidian reachable (2xx)** — write subject files directly to the vault
-  root as `<Subject>.md` via `PUT ${OBSIDIAN_MCP_URL%/}/vault/<Subject>.md`
-  (root, not a subfolder — per user preference, generated docs go to the vault
-  root so they're easy to find). Do **not** ask the user; just write there and
-  tell them the note path. On every subsequent update, overwrite the same path.
-- **Obsidian unreachable** — fall back to coding-orchestrate for local project storage.
+- **Vault reachable** — write subject files directly to the vault root as
+  `<Subject>.md` with `write_note` (`mcp__obsidian-vault__write_note`, or
+  `vault-mcp.sh call write_note '{"path":"<Subject>.md","content":"..."}'`
+  when the native tools aren't loaded) — root, not a subfolder: per user
+  preference, generated docs go to the vault root so they're easy to find.
+  Do **not** ask the user; just write there and tell them the note path. On
+  every subsequent update, overwrite the same path.
+- **Vault unreachable** — fall back to coding-orchestrate for local project storage.
 
 ### Phase 2: Compose
 

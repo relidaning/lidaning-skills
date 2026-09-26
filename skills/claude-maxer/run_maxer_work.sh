@@ -46,11 +46,11 @@ SKILL_DIR="$REPO_DIR/skills/claude-maxer"
 # grepped for it — actually implemented 2026-08-11.
 VAULT_TASKS_DIR="$REPO_DIR/skills/vault-tasks"
 MYFOLLOWS_DIR="/data/apps/myfollows"
-# The Obsidian REST vars are interactive-shell-only, and split across two
-# files: the token in ~/.zshrc.local, the URL in ~/.zshrc. Sourcing the
-# former alone leaves the URL empty, so set it explicitly.
+# Vault access goes through the headless obsidian-vault MCP container
+# (obsidian-local/scripts/vault_mcp.py); no token needed, and the Obsidian
+# app need not run. The URL lives in ~/.zshrc, which cron doesn't source.
 [[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
-export OBSIDIAN_MCP_URL="${OBSIDIAN_MCP_URL:-http://127.0.0.1:27123/}"
+export OBSIDIAN_MCP_URL="${OBSIDIAN_MCP_URL:-http://127.0.0.1:27125}"
 LOG_FILE="$HOME/.claude/state/claude-maxer.log.jsonl"
 # Read by fetch_usage_oauth.py --vault-log so the vault's usage note says
 # what each quota jump bought, instead of just how big it was.

@@ -5,7 +5,7 @@
   },
   "obsidian": {
     "type": "http",
-    "url": "${OBSIDIAN_MCP_URL}/mcp/",
+    "url": "http://127.0.0.1:27123/mcp/",
     "headers": {
       "Authorization": "Bearer ${OBSIDIAN_MCP_TOKEN}"
     }

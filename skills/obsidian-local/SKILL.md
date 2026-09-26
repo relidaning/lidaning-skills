@@ -17,12 +17,15 @@ Two MCP servers, one skill:
   behind `supergateway`), built from this skill's `server/` dir. It serves
   `http://127.0.0.1:27125/mcp` and mounts the vault
   `/data/nextcloud_client/obsidian/lidaning` at `/vault`. Its tools show up as
-  `mcp__obsidian-vault__*`.
-- **obsidian** (app-only extras) — the Local REST API plugin's own
-  endpoint at `${OBSIDIAN_MCP_URL}/mcp/` (default `http://127.0.0.1:27123`).
-  Works only while Obsidian is running. Use it only for what needs the live
-  app: `command_execute` (e.g. `app:reload`), `open_file`, and
-  `active_file_get_path`.
+  `mcp__obsidian-vault__*`. It is registered at **project scope** only, in
+  `/data/apps/blank_dir/.mcp.json`. In any other project the native tools
+  aren't loaded, so use `vault-mcp.sh call` (see "Calling the tools").
+- **obsidian** (app-only extras, not currently registered) — the Local REST
+  API plugin's own endpoint at `http://127.0.0.1:27123/mcp/`. Works only
+  while Obsidian is running. It's needed only for what needs the live app:
+  `command_execute` (e.g. `app:reload`), `open_file`, and
+  `active_file_get_path`. To use it, add the `obsidian` entry from this
+  skill's `mcp.json` to a project's `.mcp.json`.
 
 Helper script: `/data/apps/lidaning-skills/skills/obsidian-local/scripts/vault-mcp.sh`
 (referred to below as `vault-mcp.sh`).
@@ -44,8 +47,9 @@ since the session started.
 ## Calling the tools
 
 1. **`mcp__obsidian-vault__*` tools are available in this session** → call them directly.
-2. **They aren't** (the server was down when the session started, so Claude
-   Code never connected) → call the same tools through the script. The
+2. **They aren't** (you're in a project other than `/data/apps/blank_dir`,
+   or the server was down when the session started) → call the same tools
+   through the script. The
    arguments are the same JSON:
 
    ```bash
@@ -90,12 +94,14 @@ Other subcommands: `vault-mcp.sh tools`, `vault-mcp.sh logs`, `vault-mcp.sh stop
 | `active_file_get_path` | Which note is open right now |
 
 If the app is closed, say so and skip these steps. Don't try to start Obsidian.
-Direct REST fallback (only if the plugin's MCP endpoint 404s). Strip the
-trailing `/` from `$OBSIDIAN_MCP_URL` first:
+The plugin's REST API is `http://127.0.0.1:27123` (needs the app and
+`$OBSIDIAN_MCP_TOKEN`). Note that `$OBSIDIAN_MCP_URL` now points at the
+container (27125), not at the plugin.
 
-```bash
-curl -sk -H "Authorization: Bearer $OBSIDIAN_MCP_TOKEN" "${OBSIDIAN_MCP_URL%/}/vault/<path>"
-```
+For scripts/cron with no MCP session, use the Python client
+`scripts/vault_mcp.py` (`call`, `read_note`, `write_note`, `exists`); it
+talks to the container, bypasses the proxy and starts the container if it's
+down. `vault-tasks` and `claude-maxer` use it.
 
 ## Workflows
 

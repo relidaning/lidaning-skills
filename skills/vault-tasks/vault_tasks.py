@@ -4,8 +4,9 @@
 This is a library + CLI only -- it owns no schedule. claude-maxer drives it
 (`pick` -> do the work -> `mark`); see SKILL.md.
 
-Vault binding: the note is `Tasks.md` at the vault root, reachable over the
-Obsidian Local REST API. Override with VAULT_TASKS_PATH if it ever moves.
+Vault binding: the note is `Tasks.md` at the vault root, reached through the
+headless obsidian-vault MCP container (obsidian-local/scripts/vault_mcp.py), so
+the Obsidian app need not run. Override with VAULT_TASKS_PATH if it ever moves.
 
 What counts as a task
 ---------------------
@@ -20,43 +21,29 @@ harmful: it hands half a sentence to the worker as the whole job (an entry
 about the claude-maxer skill got picked up as work scoped to a different
 repo), and marking it splits the user's single item into two.
 
-Talks to the REST API directly over HTTP rather than through the obsidian
-MCP tools, so it works from an unattended context with no MCP session.
+Calls the container over HTTP itself rather than through Claude's MCP tools,
+so it works from an unattended context with no MCP session.
 """
 import os
 import re
 import sys
-import urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "obsidian-local", "scripts"))
+from vault_mcp import read_note, write_note  # noqa: E402
 
 TASKS_PATH = os.environ.get("VAULT_TASKS_PATH", "Tasks.md")
-DEFAULT_URL = "http://127.0.0.1:27123"
-
-
-def _url():
-    # OBSIDIAN_MCP_URL carries a trailing slash; naive appending yields a
-    # `//vault/...` path the REST API 404s on.
-    base = (os.environ.get("OBSIDIAN_MCP_URL") or DEFAULT_URL).rstrip("/")
-    return f"{base}/vault/{TASKS_PATH}"
-
-
-def _request(method, extra_headers=None, body=None):
-    req = urllib.request.Request(_url(), method=method, data=body)
-    req.add_header("Authorization", f"Bearer {os.environ['OBSIDIAN_MCP_TOKEN']}")
-    for k, v in (extra_headers or {}).items():
-        req.add_header(k, v)
-    # Bypass the proxy: 127.0.0.1 traffic would otherwise be swallowed by
-    # http_proxy/https_proxy, which cron-side callers must set.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(req, timeout=15) as resp:
-        return resp.read()
+_frontmatter = {}  # kept from the last read so a rewrite doesn't drop it
 
 
 def get_content():
-    return _request("GET").decode("utf-8")
+    global _frontmatter
+    _frontmatter, body = read_note(TASKS_PATH)
+    return body
 
 
 def put_content(text):
-    _request("PUT", {"Content-Type": "text/markdown"}, text.encode("utf-8"))
+    write_note(TASKS_PATH, text, frontmatter=_frontmatter)
 
 
 def is_done(line):

@@ -144,26 +144,15 @@ def _activity_suffix():
 def vault_log(rate_limits):
     """Append a one-line usage entry to today's vault heartbeat note.
 
-    Talks straight to Obsidian's Local REST API on localhost — deliberately
-    bypasses the proxy (ProxyHandler({})), which would otherwise swallow
-    127.0.0.1 traffic. Raises on failure; caller treats it as a warning.
+    Goes through the headless obsidian-vault MCP container
+    (obsidian-local/scripts/vault_mcp.py), so the Obsidian app need not run.
+    Raises on failure; caller treats it as a warning.
     """
-    token = os.environ.get("OBSIDIAN_MCP_TOKEN")
-    if not token:
-        # cron has no shell env; the token only lives in ~/.zshrc.local.
-        with open(os.path.expanduser("~/.zshrc.local")) as f:
-            for line in f:
-                if "OBSIDIAN_MCP_TOKEN=" in line:
-                    token = line.split("=", 1)[1].strip().strip("'\"")
-                    break
-    if not token:
-        raise RuntimeError("no OBSIDIAN_MCP_TOKEN in env or ~/.zshrc.local")
-    base = (os.environ.get("OBSIDIAN_MCP_URL") or "http://127.0.0.1:27123").rstrip("/")
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "obsidian-local", "scripts"))
+    from vault_mcp import exists, write_note
 
     note_path = f"claude-maxer/usage/{time.strftime('%Y-%m-%d')}.md"
-    url = f"{base}/vault/{urllib.request.quote(note_path)}"
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "text/markdown"}
 
     five = rate_limits.get("five_hour", {})
     line = (
@@ -173,15 +162,7 @@ def vault_log(rate_limits):
     )
 
     # New day = new note: give it a heading before the first entry.
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=10):
-            exists = True
-    except urllib.error.HTTPError as e:
-        e.read()
-        if e.code != 404:
-            raise
-        exists = False
-    if not exists:
+    if not exists(note_path):
         line = (
             f"# claude-maxer usage log — {time.strftime('%Y-%m-%d')}\n\n"
             f"Appended by `fetch_usage_oauth.py --vault-log` "
@@ -189,12 +170,8 @@ def vault_log(rate_limits):
             f"resets, and what the loop spent it on.\n\n{line}"
         )
 
-    # POST /vault/<path> appends (Local REST API v4+), creating if missing.
-    req = urllib.request.Request(
-        url, data=line.encode(), headers=headers, method="POST"
-    )
-    with opener.open(req, timeout=10) as r:
-        r.read()
+    # mode=append creates the note (and parent dirs) if missing.
+    write_note(note_path, line, mode="append")
     return note_path
 
 
@@ -349,7 +326,7 @@ def main():
             note = vault_log(rate_limits)
             print(f"vault heartbeat appended to {note}", file=sys.stderr)
         except Exception as e:
-            # Obsidian closed / plugin off / token moved — never fail the fetch.
+            # Vault container down / unreachable — never fail the fetch.
             print(f"WARN: vault log skipped ({e})", file=sys.stderr)
 
     parts = [
