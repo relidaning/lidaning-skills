@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "suite": "claude-maxer",
+  "target_skill": "claude-maxer",
+  "version": "1.0.0",
+  "frozen": true,
+  "cases_sha256": "3729e6564da512e69a3d0bde38d1826561093992534dfd8612d0ba3601812eb6",
+  "created": "2026-09-26",
+  "skill_sha256_at_creation": "a7a26661e9a3634f594bcef8df3c5bb87ff9c7daef5bd24f0081aec13464d5e7",
+  "trigger_policy": "conditional",
+  "defaults": {
+    "models": [
+      "sonnet"
+    ],
+    "k": 2,
+    "split": "test",
+    "jobs": 4,
+    "timeout_s": 300,
+    "judge_model": "sonnet",
+    "pass_threshold": 0.75
+  },
+  "thresholds": {
+    "trigger_f1": 0.85,
+    "false_positive_rate": 0.1,
+    "behavior_pass_rate": 0.7
+  },
+  "disallowed_tools": [
+    "Bash",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Task",
+    "Agent",
+    "mcp__obsidian__vault_write",
+    "mcp__obsidian__vault_append",
+    "mcp__obsidian__vault_patch",
+    "mcp__obsidian__vault_delete",
+    "mcp__nextcloud__nc_webdav_write_file",
+    "mcp__nextcloud__nc_webdav_delete_resource",
+    "mcp__nextcloud__nc_webdav_move_resource",
+    "mcp__nextcloud__nc_webdav_copy_resource",
+    "mcp__rag__rag_ingest",
+    "mcp__rag__rag_load",
+    "mcp__rag__rag_remove",
+    "mcp__rag__rag_clear"
+  ],
+  "reply_strip_regex": [
+    "(?s)=== English Practice ===.*?=== English Practice ===\\s*"
+  ],
+  "notes": "",
+  "frozen_at": "2026-09-26T12:27:52"
+}
