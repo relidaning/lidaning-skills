@@ -35,7 +35,7 @@ The window isn't tied to the clock plan, so a window you opened yourself
 also gets filled in its last hour.
 
 Vault output (only written when tasks actually run):
-  claude-maxer/news/YYYY-MM-DD-<domain>.md   the digests, one note per domain per day
+  claude-maxer/news/YYYY-MM-DD.md            the day's digests, one section per task
   claude-maxer/log/YYYY-MM-DD.md             one block per run, one line per task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
@@ -49,6 +49,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -72,6 +73,7 @@ ENTER_MAX_MIN = 65      # start only when the window resets within this many min
 STOP_MARGIN_MIN = 10    # ...and stop starting tasks this close to the reset
 KILL_MARGIN_S = 120     # hard-kill running tasks this long before the reset
 TASK_TIMEOUT_S = 25 * 60
+OVERSHOOT_PCT = 3        # a batch may end at most this far above TARGET_5H_PCT
 CONCURRENCY = int(os.environ.get("MAXER_CONCURRENCY", 3))
 DEFAULT_TASK_PCT = 4.0  # first guess at 5h% per task; replaced by measurement
 SNAPSHOT_MAX_AGE_S = 20 * 60
@@ -197,12 +199,13 @@ def next_domains(n):
 VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
 
 
-def note_path(slug, day):
-    return f"claude-maxer/news/{day}-{slug}.md"
+def note_path(day):
+    return f"claude-maxer/news/{day}.md"
 
 
 def covered_titles(path):
-    """Titles already in today's note, so a later run doesn't repeat them."""
+    """Titles already in today's note (any topic), so a later task doesn't
+    repeat them."""
     try:
         with open(os.path.join(VAULT_ROOT, path)) as f:
             return re.findall(r"\*\*\[([^\]]+)\]\(", f.read())
@@ -210,12 +213,15 @@ def covered_titles(path):
         return []
 
 
+_vault_lock = threading.Lock()  # parallel tasks append to the same daily note
+
+
 def vault_append(path, text, heading=None):
     full = os.path.join(VAULT_ROOT, path)
     os.makedirs(os.path.dirname(full), exist_ok=True)
-    with open(full, "a") as f:
+    with _vault_lock, open(full, "a") as f:
         if heading and f.tell() == 0:
-            f.write(heading)
+            text = heading + text
         f.write(text)
 
 
@@ -262,7 +268,7 @@ def build_prompt(desc, already):
 
 
 def run_task(slug, title, desc, day, deadline):
-    path = note_path(slug, day)
+    path = note_path(day)
     already = covered_titles(path)
     cmd = [
         "claude", "-p", build_prompt(desc, already),
@@ -298,9 +304,9 @@ def run_task(slug, title, desc, day, deadline):
         res["error"] = (out.get("subtype") or "no linked entries in reply")[:120]
         return res
     text = list_only(text)
-    heading = f"# {title} news — {day}\n\nCollected by claude-maxer.\n"
+    heading = f"# News — {day}\n\nCollected by claude-maxer, one section per topic run.\n"
     try:
-        vault_append(path, f"\n## {hm(started)}\n\n{text}\n", heading=heading)
+        vault_append(path, f"\n## {hm(started)} · {title}\n\n{text}\n", heading=heading)
     except Exception as e:
         res["error"] = f"vault write failed: {e}"[:120]
         return res
@@ -339,7 +345,8 @@ def cmd_run(dry_run):
     vault_append(
         log_note,
         f"\n### {hm(time.time())} run — window resets {hm(reset)}, "
-        f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (pace line {weekly_line(u, time.time()):.0f}%)\n\n",
+        f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (pace line {weekly_line(u, time.time()):.0f}%) "
+        f"· [[claude-maxer/news/{day}|news {day}]]\n\n",
         heading=f"# claude-maxer log — {day}\n\nWritten only when claude-maxer runs tasks. "
                 f"News lands in claude-maxer/news/.\n",
     )
@@ -352,8 +359,13 @@ def cmd_run(dry_run):
         ok, why = gate(u, now)
         if not ok:
             break
-        room = TARGET_5H_PCT - (u["five_pct"] or 0)
-        n = max(1, min(CONCURRENCY, int(room // max(per_task, 0.5))))
+        # Never start a task expected to push 5h past the target plus a small
+        # margin: 100% locks the user out until the reset.
+        room = TARGET_5H_PCT + OVERSHOOT_PCT - (u["five_pct"] or 0)
+        n = min(CONCURRENCY, int(room // max(per_task, 0.5)))
+        if n < 1:
+            why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
+            break
         batch = next_domains(n)
         before = u["five_pct"] or 0
         with ThreadPoolExecutor(max_workers=n) as ex:
@@ -364,13 +376,12 @@ def cmd_run(dry_run):
             per_task = delta / n
         for r in results:
             total_cost += r["cost"]
-            name = r["path"].rsplit("/", 1)[1][:-3]
             if r.get("error"):
                 line = f"- {hm(r['start'])}–{hm(r['end'])} · {r['slug']} · failed: {r['error']} · ${r['cost']:.2f}\n"
             else:
                 tasks_done += 1
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['slug']} · {r['items']} stories "
-                        f"· ${r['cost']:.2f} · [[claude-maxer/news/{name}|{name}]]\n")
+                        f"· ${r['cost']:.2f}\n")
             vault_append(log_note, line)
             log("task", **{k: v for k, v in r.items() if k != "path"})
         vault_append(log_note, f"- 5h now {u['five_pct']}% (batch of {n}: +{delta:.0f}pp)\n")

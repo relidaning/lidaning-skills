@@ -44,7 +44,8 @@ never opens a window itself. In that last hour it starts news-digest tasks in
 batches (up to 3 in parallel). After each batch it refreshes usage and sizes
 the next batch from how much 5h% the last one used. It stops when:
 
-- 5h usage reaches **95%**;
+- 5h usage reaches **95%**, or one more task (sized from the last batch)
+  would push it past 98%. Hitting 100% would lock you out until the reset;
 - 7d usage passes its **pace line**, `95% × (fraction of the week elapsed) + 5%`.
   This is the binding limit: one full window costs ~7pp of the week, so four
   a day would use up the weekly cap in about three days. Expect only about
@@ -60,8 +61,8 @@ repeated.
 
 ## Output (vault, written only when tasks run)
 
-- `claude-maxer/news/YYYY-MM-DD-<domain>.md`: the digests, one `## HH:MM`
-  section per task.
+- `claude-maxer/news/YYYY-MM-DD.md`: all of the day's digests in one note,
+  one `## HH:MM · Topic` section per task.
 - `claude-maxer/log/YYYY-MM-DD.md`: one block per run, with a line per
   task and per batch (5h after it) and a stop reason.
 
