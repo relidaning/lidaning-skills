@@ -1,0 +1,16 @@
+# Headless vault MCP server: edits the vault's files directly, so the
+# Obsidian app doesn't need to be running. Started on demand by
+# ../scripts/vault-mcp.sh ensure.
+name: obsidian-vault-mcp
+services:
+  obsidian-vault-mcp:
+    build: .
+    image: obsidian-vault-mcp:latest
+    container_name: obsidian-vault-mcp
+    restart: unless-stopped
+    user: "${VAULT_UID:-1000}:${VAULT_GID:-1000}"   # match the vault's host owner
+    ports:
+      - "127.0.0.1:${OBSIDIAN_VAULT_MCP_PORT:-27125}:8000"
+    volumes:
+      - ${OBSIDIAN_VAULT_PATH:-/data/nextcloud_client/obsidian/lidaning}:/vault
+    mem_limit: 256m

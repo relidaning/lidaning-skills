@@ -1,9 +1,10 @@
 name: obsidian-local
-description: Local Obsidian vault access via REST API MCP. Search, read, create, update, revise, and delete notes.
+description: Local Obsidian vault access via a headless, auto-started MCP container (no Obsidian app needed), plus the REST API plugin for app-only commands. Search, read, create, update, revise, and delete notes.
 scope: project
 tags:
   - obsidian
   - notes
   - rest-api
+  - docker
   - mcp
   - local

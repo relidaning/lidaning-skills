@@ -155,8 +155,9 @@ curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
 ### Store a summary note in the vault (standard step after every download)
 
 Every verified download also gets a markdown summary note in the Obsidian
-vault, written via the `obsidian-local` skill (MCP `vault_write`, curl REST
-fallback):
+vault, written via the `obsidian-local` skill (`write_note` on the headless
+`obsidian-vault` MCP server, or `vault-mcp.sh call write_note` if its tools
+aren't loaded):
 
 - **Path**: `0_dev/AI/Papers/<arxiv-id> - <title>.md` (same title
   sanitization as the PDF). This explicit path overrides `obsidian-local`'s

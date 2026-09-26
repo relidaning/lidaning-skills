@@ -25,7 +25,11 @@ prompts with `claude -p "<prompt>" --model <id> --output-format stream-json
 --verbose` and grep the stream for `"name":"Skill"` (TRIGGERED/SKIPPED per
 probe, 2 passes per candidate since single probes are noisy). Always pass
 `--disallowedTools Bash Edit Write NotebookEdit Task mcp__obsidian__vault_write
-mcp__obsidian__vault_append mcp__obsidian__vault_patch mcp__obsidian__vault_delete`
+mcp__obsidian__vault_append mcp__obsidian__vault_patch mcp__obsidian__vault_delete
+mcp__obsidian-vault__write_note mcp__obsidian-vault__patch_note
+mcp__obsidian-vault__delete_note mcp__obsidian-vault__move_note
+mcp__obsidian-vault__move_file mcp__obsidian-vault__update_frontmatter
+mcp__obsidian-vault__manage_tags`
 — without it, probes run in the repo under test with full write access — and
 diff the repo after a probe batch. This version scales the paper's mechanics
 down to fit inside a conversation, with Claude playing optimizer, the probe
