@@ -5,8 +5,8 @@ description: >
   note, the status of Tasks.md processing, "vault-tasks", or unattended task
   work landing in /data/apps/myfollows. Reads and checks off undone items in
   the Obsidian vault's Tasks note via `vault_tasks.py pick|list|mark`. This
-  skill owns no schedule — report that claude-maxer runs the drain hourly as
-  its priority-1 work type, rather than pointing at a standalone cron entry.
+  skill owns no schedule, and as of 2026-09-27 nothing drains the queue
+  unattended (claude-maxer now only runs news digests) — say so plainly.
 ---
 
 # vault-tasks
@@ -72,21 +72,18 @@ Do **not** re-add a second cron loop: two independent loops sharing one
 quota pool each pass the usage gate on their own while jointly exhausting
 the 5h window, which is exactly why the standalone entry died.
 
-**Current reality check** — the drain *is* implemented: `run_maxer_work.sh`
-picks a task with `vault_tasks.py pick`, runs it with `cwd=/data/apps/myfollows`,
-commits directly to master (no branch/PR — the user's explicit choice
-2026-08-08, unlike claude-maxer's own dep-audit/todo-triage work), and
-`mark`s it only on success. See claude-maxer's SKILL.md "Work priority"
-section for the authoritative description — this file doesn't duplicate it,
-to avoid the two drifting out of sync again. A crontab comment once claimed
-this fold-in existed for a day before it actually did; if this section ever
-looks stale, verify with
-`grep -n 'Tasks\.md' skills/claude-maxer/run_maxer_work.sh` rather than
-trusting either doc.
+**Current reality check (2026-09-27)** — nothing drains the queue unattended
+anymore. claude-maxer used to pick a task with `vault_tasks.py pick`, run it
+in `/data/apps/myfollows`, commit to master and `mark` it; its 2026-09-27
+rewrite (`maxer.py`) replaced all work types with news digests at the user's
+request, and that drain code is gone. `vault_tasks.py` still works for manual
+`list`/`pick`/`mark`. To restore an unattended drain, add it as a task type in
+`skills/claude-maxer/maxer.py` (one scheduler per quota pool, per the rule
+above) rather than a new cron loop. The old implementation is in git:
+`git show fd340bf6:skills/claude-maxer/run_maxer_work.sh`.
 
-Because commits land on master unreviewed, a bad unattended change ships
-without a gate. If that stops feeling safe, switch the prompt to the
-branch+draft-PR pattern rather than raising the budget cap.
+If a drain is restored: the old one committed to master unreviewed, so a bad
+unattended change shipped without a gate. Prefer the branch+draft-PR pattern.
 
 ## Operational notes
 

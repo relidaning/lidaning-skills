@@ -9,7 +9,7 @@ data with no browser at all. Kept only in case that endpoint goes away.
 Opens https://claude.ai/new#settings/usage with Playwright (persistent
 profile, so login survives across runs) and extracts the Current session
 (5h) and Weekly (7d) usage limits. Writes them to
-~/.claude/state/usage_snapshot.json in the exact shape check_usage.py /
+~/.claude/state/usage_snapshot.json in the exact shape maxer.py /
 statusline.py already use — this is the headless-safe replacement for the
 "snapshot only refreshes during interactive sessions" limitation.
 

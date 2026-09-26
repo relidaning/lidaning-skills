@@ -11,7 +11,7 @@ hook, and supersedes fetch_usage_web.py, which Cloudflare's human check
 blocks anyway).
 
 Writes ~/.claude/state/usage_snapshot.json in the exact shape
-check_usage.py / statusline.py already use, tagged "source": "oauth-api".
+maxer.py / statusline.py already use, tagged "source": "oauth-api".
 
 Token freshness: fully self-sufficient. Access tokens live ~8h; when the
 cached one is expired (or the API answers 401/403), this script refreshes
@@ -28,7 +28,7 @@ API — a visible proof the background loop is alive. Each line carries the
 5h number plus what the loop was doing, so the note reads as "quota spent
 on X" rather than a bare percentage; 7d was dropped from the note on
 2026-08-11 (it moves too slowly to be worth a line every 15 minutes, and is
-still in the snapshot for check_usage.py's pro-rata gate). Token comes from
+still in the snapshot for maxer.py's weekly pace line). Token comes from
 $OBSIDIAN_MCP_TOKEN or is parsed out of ~/.zshrc.local (cron has no shell
 env). Vault errors (Obsidian closed, plugin off) only warn; the snapshot
 fetch still succeeds.
@@ -290,7 +290,7 @@ def main():
         return 1
 
     # Model-scoped weekly limits (e.g. per-model caps) ride along for
-    # visibility; check_usage.py ignores them.
+    # visibility; maxer.py ignores them.
     scoped = [
         {
             "kind": lim.get("kind"),

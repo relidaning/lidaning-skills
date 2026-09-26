@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# claude-maxer: enroll/remove the crontab entry that fires run_maxer_work.sh.
+# claude-maxer: enroll/remove the crontab entries that drive maxer.py.
 #
-# Default schedule: 03:30, 07:30, 12:30, 17:30, 22:30 every day, in this
-# machine's local time (CST / Asia/Shanghai — cron has no per-entry timezone
-# here). Override with MAXER_SCHEDULE="<cron expr>".
+#   0 3,8,13,18 * * *   open  start the pinned 5h windows (03-08, 08-13,
+#                             13-18, 18-23; 23-03 is the buffer, see maxer.py)
+#   */15 * * * *        run   acts only in a window's last hour, filling it
+#                             toward 95%; every other tick is a cheap no-op
+#
+# Times are this machine's local time (CST / Asia/Shanghai). Override with
+# MAXER_OPEN_SCHEDULE / MAXER_RUN_SCHEDULE="<cron expr>".
 #
 # The entry lives between BEGIN/END marker comments, so install is idempotent
 # (re-running replaces the block) and remove touches nothing else in the
@@ -15,14 +19,16 @@ set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SKILL_DIR/run_maxer_work.sh"
-SCHEDULE="${MAXER_SCHEDULE:-30 3,7,12,17,22 * * *}"
+OPEN_SCHEDULE="${MAXER_OPEN_SCHEDULE:-0 3,8,13,18 * * *}"
+RUN_SCHEDULE="${MAXER_RUN_SCHEDULE:-*/15 * * * *}"
 LOG="/tmp/claude-maxer-cron.log"
 BEGIN="# BEGIN claude-maxer schedule (managed by enroll_cron.sh)"
 END="# END claude-maxer schedule"
 
 block() {
   echo "$BEGIN"
-  echo "$SCHEDULE $RUNNER >> $LOG 2>&1"
+  echo "$OPEN_SCHEDULE $RUNNER open >> $LOG 2>&1"
+  echo "$RUN_SCHEDULE $RUNNER run >> $LOG 2>&1"
   echo "$END"
 }
 
@@ -40,7 +46,7 @@ case "${1:-status}" in
   install)
     [[ -x "$RUNNER" ]] || { echo "ERROR: $RUNNER missing or not executable" >&2; exit 1; }
     { without_block; block; } | crontab -
-    echo "Enrolled: $SCHEDULE -> $RUNNER"
+    echo "Enrolled:"; block
     ;;
   remove)
     without_block | crontab -
