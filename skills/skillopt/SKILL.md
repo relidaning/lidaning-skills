@@ -34,6 +34,13 @@ subagent** judging body-output quality against the held-out probes (same
 fresh-eyes principle as `/code-review`'s verify pass, standing in for the
 paper's separate optimizer-vs-target-model split).
 
+**If the target has a frozen `skill-bench` suite**
+(`skills/skill-bench/suites/<skill>/suite.json`), use it instead of ad-hoc
+probes: reflect on `bench.py run <skill> --split dev` results, and gate the
+final candidate with a `--split test` run compared against the suite's last
+history row. Accept only if the report's paired-by-case delta is positive and
+not marked `(n.s.)`. Never read `test` cases while editing (leakage).
+
 ## Two modes
 
 - **Directed** (the main new capability): user gives a target skill *and* a

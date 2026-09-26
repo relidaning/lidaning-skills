@@ -50,12 +50,22 @@ skill draws curricula from — see "BeSmart integration" below for the full
 data flow. List its incomplete plans:
 
 ```bash
-python3 skills/learning-instruct/besmart_sync.py list
+python3 "$SKILL_DIR/besmart_sync.py" list
 ```
+
+`$SKILL_DIR` is this skill's own directory, given to you at activation as
+"Base directory for this skill". **Always resolve `besmart_sync.py` against
+it, never against the current working directory** — the bare relative path
+`skills/learning-instruct/besmart_sync.py` only exists when you happen to be
+sitting in the lidaning-skills repo, so in every other project the script
+would appear to be missing and, per the silent-fallback rule below, the whole
+besmart integration would no-op without ever reporting an error. This applies
+to every `besmart_sync.py` invocation in this file.
 
 If the command errors (besmart's container isn't running, `docker`/`pyjwt`
 unavailable, etc.), skip silently to the project-read flow below — besmart is
-an enhancement, never a hard dependency.
+an enhancement, never a hard dependency. A *missing script* is not that case:
+if the file isn't where you resolved it, say so rather than silently skipping.
 
 If plans come back, present them (name, description, date range) and ask
 whether to use one as this session's goal, or set a goal that isn't on
@@ -76,8 +86,7 @@ besmart at all. Don't auto-pick — let the user choose.
 **Read the project first** to understand what the user is working on. Look at:
 
 - `CLAUDE.md` — project overview and skills
-- `SESSION.md` — recent session goals and current state
-- `.claude/TODO.md` — what's planned or in progress
+- `.claude/SESSION.md` (or root `SESSION.md`) — recent goals and current state
 - `.claude/MEMORIES.md` — user preferences
 - `git log --oneline -10` — recent commits and what's been built
 - The current branch name
@@ -132,12 +141,30 @@ the resulting `//` and Obsidian looks unreachable when it isn't.)
 
 ### Phase 2: Compose
 
-Research the goal topic (use web search). Break it down into logical parts —
-concepts, skills, or subtopics that build on each other. Generate
-compositions.md content and hand to coding-orchestrate.
+Research the goal topic (use web search). **Anchor the whole track in a real,
+industry problem**: before drafting parts, identify a concrete, real-world
+problem or issue that the subject's actual industry-standard stack or tools
+are used to solve in practice — not a toy example invented for teaching.
+State it in 1-2 sentences (what's broken or needed, who hits this, what
+stack/tools solve it for real) and design the composition as the path to
+resolving it — each part is a step toward that resolution, not an isolated
+topic.
 
-Present the breakdown to the user. Let them reorder, add, or remove parts
-before proceeding.
+**Name parts after the real-world workflow, not the underlying concepts.**
+Break the problem down the way someone actually doing this job would: the
+concrete milestones on the way to a working resolution (e.g. for "ship an
+image classifier" — collect & label data, design the model, train it,
+evaluate it, iterate on what evaluation surfaces, ship it) — not the
+framework's chapter list (e.g. "Tensors & autograd", "Dataset & DataLoader",
+"nn.Module"). The underlying concepts still get taught in full — they're the
+toolset covered *inside* whichever workflow milestone needs them, not the
+part's name or organizing principle. A user should be able to read the part
+titles alone and see the shape of solving the actual problem, not a table of
+contents for the library's API. Generate compositions.md content (opening
+with the problem statement) and hand to coding-orchestrate.
+
+Present the breakdown to the user, including the problem statement it's
+anchored on. Let them reorder, add, or remove parts before proceeding.
 
 If GOAL.md has a `BeSmart plan`, once the breakdown is locked in, push every
 non-strikethrough part that doesn't already carry a `(besmart task #N)` tag
@@ -149,9 +176,31 @@ python3 skills/learning-instruct/besmart_sync.py create-task <plan_id> "<part na
 
 Tag the part in compositions.md with the returned task id (see
 [compositions.md](compositions.md)). besmart's `plan_tasks` are a WBS tree —
-for parts substantial enough to benefit from it, also push a leaf breakdown
-(install/setup → concept → demo → interview question is a reliable default
-shape) as children of that parent:
+**every part gets a leaf breakdown, because the leaf is the actual teaching
+unit, not the part.** A part is a stage of the workflow (e.g. "Design your
+classifier"); a leaf is one concrete, specific real-life issue or symptom
+that comes up while working that stage — narrow enough to have its own short
+step-by-step fix, not a generic "install / concept / demo / interview
+question" template. "Design your classifier" isn't taught as one block; it's
+3-5 concrete issues in sequence, e.g. "you only have a few hundred images
+for your rarest categories, training from scratch won't converge" → "you
+swap in a pretrained backbone but the output layer shape doesn't match your
+class count" → "fine-tuning the whole network overfits your small dataset."
+
+**Chain the leaves — each one is caused by the previous one's fix.** Note in
+that example that leaf 2 exists *because* leaf 1 was resolved by reaching for
+a pretrained backbone, and leaf 3 exists *because* leaf 2 was resolved by
+wiring that backbone in. That causal chain is what makes a track feel like a
+tutorial walking the user through real work instead of a themed list of
+exercises. Before locking the breakdown in, read the leaves of each part in
+order and check that each one's issue could only have surfaced after the
+previous one's resolution; if a leaf could be swapped to any position without
+anything reading oddly, it's a topic wearing an issue's clothes — rewrite it
+as the symptom that actually follows from the leaf before it. The same holds
+one level up: each part should open on the situation the previous part's
+completion creates.
+
+Push each as a child of the part:
 
 ```bash
 python3 skills/learning-instruct/besmart_sync.py create-task <plan_id> "<leaf name>" "<leaf detail>" <planned_start> <planned_end> --parent-task-id <parent_id>
@@ -162,28 +211,64 @@ confirm the live tree matches compositions.md before moving on.
 
 ### Phase 3: Teach
 
-Work through each composition part one at a time. For each part:
+Work through each composition part one **leaf** (one concrete issue) at a
+time — the leaf, not the part, is the teaching unit; a part is just the
+label for the stage its leaves belong to.
 
-1. **Explain comprehensively** — cover the core idea, how it works, use cases,
-   variants/forms, edge cases & limitations, connections to other concepts,
-   and common mistakes. Don't just teach the happy path — go deep on every
-   subtopic that falls under this part. Use web search to verify your
-   explanations and to find important points you might have missed.
-2. **Check understanding** — ask targeted questions that probe edge cases
-   and connections, not just recall of the definition
-3. **Apply** — have the user write code, solve a problem, or explain back.
-   Choose exercises that exercise the tricky parts, not just the basics
-4. **Audit coverage** — before marking done, check: did you cover EVERY
-   subtopic listed in the compositions breakdown? Did you miss any edge
-   cases, variants, or "what you can't do" items? Go back and fill gaps
-5. Mark the part as done only when understanding is demonstrated AND all
-   subtopics are covered. besmart only lets **leaves** carry completion
-   state — a parent's checkmark is derived from its children, not settable
-   directly. So: as each `(leaf #N)`-tagged sub-item is covered, run
-   `besmart_sync.py complete-task <plan_id> <leaf_id>` right then, not
-   batched to the end of the part. If the part has no leaf breakdown (just a
-   `(besmart task #N)` tag on the part itself), complete that task directly
-   once the whole part is done. Don't wait for Phase 4 (see [steps.md](steps.md))
+Every leaf is taught as **what → how → why**, in that order, and all three
+beats are mandatory. The user should never receive a resolution without
+understanding why it worked, and never receive a concept that isn't attached
+to the symptom that motivated it. For each leaf:
+
+1. **What — state the issue** — the specific, narrow real-life problem this
+   leaf covers, in the terms the user would actually hit it: the command they
+   ran, the error or wrong output they got, what they expected instead. Not
+   the part's broad problem restated — the concrete symptom this leaf
+   actually is. Open by connecting it to the previous leaf's resolution
+   ("now that X works, the next thing that breaks is…") so the sequence
+   reads as one walkthrough rather than a list of separate exercises.
+2. **How — resolve it, step by step** — walk the user hands-on through
+   fixing it with the real stack, right now. Keep narration to just what's
+   needed to make each step make sense — this is not the deep dive.
+3. **Why — explain what just happened** — two things, both required, and
+   this is the beat that keeps concepts from feeling bolted on:
+   - **Why the fix works** — the mechanism. What was actually going wrong
+     underneath the symptom, and what the change did about it.
+   - **Why this is the standard answer** — name the industry-standard
+     concept or practice this resolution is an instance of, and what
+     trade-off it buys. This is where the vocabulary and mental model get
+     delivered — as the explanation of a fix the user just performed, never
+     as a standalone lecture block before or after it.
+
+   Keep it to a few paragraphs. Exhaustive treatment is step 4's job.
+4. **Write the full depth to the subject file** — internals, edge cases,
+   variants, common mistakes, connections: everything "Comprehensiveness
+   over brevity" (see Rules) requires still gets produced, right now, into
+   `<Subject>.md` (verify with web search, same as always) — but as written
+   reference material only. Do not paste, summarize, or print step 4's
+   content into the chat reply at this point — write it to the file and stop
+   talking about it until step 5 says otherwise. This is where exhaustive
+   coverage actually lives.
+5. **Invite the deep dive, don't force it** — check in: "Any questions about
+   what's under the hood here, or ready for the next issue?" If they ask,
+   answer from what you just wrote in step 4 (or go deeper live if their
+   question isn't covered yet, and write that back too). If they don't ask,
+   move on — the depth stays in the reference for whenever they want it.
+6. **Check basic understanding** — a light check on the *what/how/why* of
+   this leaf: can they say what the symptom was, reproduce the fix, and
+   explain why it worked? The "why" half is the one that actually matters —
+   a user who can repeat the commands but can't say what they addressed
+   hasn't learned the leaf. Not a probe of every edge case from step 4
+7. Mark the leaf done once the issue is resolved and basic understanding of
+   *that resolution* is confirmed — not once every subtopic has been
+   narrated aloud. Run `besmart_sync.py complete-task <plan_id> <leaf_id>`
+   right then, not batched. besmart derives the parent part's checkmark
+   automatically once every leaf under it is done — never call
+   `complete-task` on a task that **has children**, since besmart silently
+   no-ops it. (A part with no leaf breakdown at all is itself a leaf in
+   besmart's tree, so completing its `(besmart task #N)` id directly is
+   correct — the ban is on parents, not on parts.) Don't wait for Phase 4
+   (see [steps.md](steps.md))
 
 Hand steps.md updates to coding-orchestrate as progress is made.
 
@@ -256,15 +341,15 @@ of. Neither app owns the other; they're linked per-goal by ids.
 - besmart `study_plans` row ↔ this skill's GOAL.md (linked via `BeSmart plan: #id`)
 - besmart `plan_tasks` **parent** rows ↔ this skill's compositions.md parts
   (linked via `(besmart task #id)` tags)
-- besmart `plan_tasks` **leaf** rows, when a part gets one, ↔ compositions.md
-  sub-items (linked via `(leaf #id)` tags) — install/concept/demo/interview-
-  question is the default shape for a leaf breakdown, but isn't mandatory for
-  every part
+- besmart `plan_tasks` **leaf** rows ↔ compositions.md sub-items (linked via
+  `(leaf #id)` tags) — each leaf is one concrete, specific real-life issue,
+  mandatory for every part (see "Phase 2: Compose" and compositions.md); the
+  old install/concept/demo/interview-question template is retired
 - Only leaves carry completion state in besmart; a parent's checkmark is
   derived client-side from whether every leaf descendant is done. So Phase 3
-  calls `complete-task` on the leaf id as each sub-step is covered (or on the
-  part id directly, for parts with no leaf breakdown) — never on a parent
-  that has children
+  calls `complete-task` on the leaf id as each issue is resolved (or on the
+  part id directly, for the rare part that IS a single issue with no leaf
+  breakdown) — never on a parent that has children
 - All parts done (Phase 4) → `complete-plan` → besmart plan flips done
 - The rich content (Subject.md, steps.md, quizzes, issues) never lives in
   besmart — it stays in this skill's usual output (vault or local project).
@@ -304,21 +389,34 @@ works exactly as it did before this integration existed.
   composition reordered, part mastered, new insight surfaced), regenerate
   the relevant content and hand it off. Don't batch — update as you go
 - **Goal first** — don't skip to teaching without a clear, specific goal
-- **Comprehensiveness over brevity** — in teaching content (subject.md,
-  steps.md), depth beats conciseness. Cover ALL key concepts, subtopics,
-  edge cases, variants, connections, and common mistakes. A reader should
-  learn the topic from these files alone. Don't skip the "boring" parts —
-  limitations and what-you-can't-do are often the most valuable
+- **Problem-first, then depth** — every composition opens on a real,
+  industry-relevant problem solved by the subject's actual stack, and each
+  part is a sequence of concrete, issue-sized leaves — not a block of
+  concepts (see Phase 2/3). Depth is never skipped, only deferred: it gets
+  written in full every time (step 4 below), but is narrated live only when
+  asked for
+- **Comprehensiveness over brevity — in the written reference, not the live
+  narration** — `<Subject>.md` (and steps.md's record of what was covered)
+  must cover ALL key concepts, subtopics, edge cases, variants, connections,
+  and common mistakes for every leaf taught, so a reader could learn the
+  topic from these files alone. This is a bar for what gets *written*
+  (Phase 3 step 4) and for how deep you go *when the user asks* (step 5) —
+  it is NOT a mandate to narrate every subtopic aloud before the user can
+  move to the next issue. Conflating the two is what "problem-first" is
+  correcting
 - **Truth over confidence** — every explanation, concept, quiz answer, and
   scenario solution must be factually correct. Verify claims with web search
   before teaching. If unsure, say so and look it up — never guess. Cite sources
   when non-obvious
 - **User owns the breakdown** — present compositions for approval; let them
   reshape it
-- **Mastery over coverage** — don't move to the next part until the user
-  demonstrates understanding of the current one
-- **Practical application** — every part should include an exercise or
-  application, not just explanation
+- **Basic understanding over exhaustive mastery, per issue** — don't move to
+  the next leaf until the user can reproduce or explain the resolution they
+  just did. Full depth is always available (written to the subject file,
+  answerable on request) but is never a gate to moving on
+- **Practical application** — every leaf's own step-by-step resolution IS
+  the application; nothing needs a separate bolted-on exercise unless the
+  resolution itself was too easy to demonstrate real understanding
 - **Honest evaluation** — don't inflate scores. Identify real gaps so the
   user knows where to focus
 - **Write to the subject content immediately** — after every quiz, scenario, or

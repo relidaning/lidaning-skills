@@ -1,88 +1,71 @@
 # steps.md
 
 Teaching progress and a detailed knowledge reference. Lives at
-`.learning-instruct/steps.md`. Tracks which compositions have been taught,
-but more importantly records the full scope of knowledge shared — every
-explanation, example, insight, edge case, variant, connection, and exercise —
-so the user can review and recall the material later without re-reading
-the chat. This file is the **complete transcript of teaching**, not an
-outline or summary.
+`.learning-instruct/steps.md`. Tracks which leaves have been taught, but more
+importantly records the full walkthrough — every symptom hit, every
+resolution performed, why each fix worked, and the depth that came out of it —
+so the user can review and recall the material later without re-reading the
+chat. This file is the **complete transcript of teaching**, not an outline or
+summary.
+
+It is organized **by leaf, in the order taught** — the same causal sequence
+the user lived through. It is deliberately not organized by concept: a
+concept-indexed record is what the subject file (`<Subject>.md`) is for, and
+splitting the record into "concepts covered" over here and "exercises done"
+over there is exactly what makes a learning track feel like two unrelated
+things bolted together.
 
 ## Format
 
 ```markdown
 # Teaching Steps
 
-## Part 1: Generic functions — done
+## Part 1: Diagnose the misuse — done
 
-### Concepts explained
+Stage goal: reproduce the untyped/`any` failure and pin down what caller code
+is doing wrong.
 
-**Type parameters** — `<T>` declares a type variable that the caller provides.
-```ts
-function identity<T>(value: T): T {
-  return value;
-}
-```
-The compiler infers `T` from the argument unless you specify it explicitly.
+### Leaf 1.1: A caller passes `{ name: string }` where `{ id: number }` was required, and it compiles anyway — done
 
-**Inference** — TypeScript narrows `T` from the argument type at each call
-site. `identity("hello")` infers `T = string`. Works positionally with
-multiple parameters.
+**What went wrong.** In `src/config/load.ts` the user called
+`parseConfig({ name: "svc-a" })` against a helper whose callers are supposed
+to pass `{ id: number }`. `tsc` reported no error; the failure only showed up
+at runtime as `undefined` where an id was expected.
 
-**Constraints** — `extends` restricts what `T` can be:
-```ts
-function getProperty<T extends { id: number }>(obj: T) {
-  return obj.id; // OK — T is guaranteed to have id
-}
-```
-Misuse: over-constraining. If you only need `.id`, constrain to `{ id: number }`,
-not `{ id: number; name: string }`.
+**How we fixed it.** Walked the actual repro:
+1. Reproduced with a 4-line file, confirmed `tsc --noEmit` stayed silent.
+2. Inspected the signature — `parseConfig(input: any): any`.
+3. Replaced the `any` parameter with a type parameter:
+   ```ts
+   function parseConfig<T>(input: T): T { ... }
+   ```
+4. Re-ran `tsc --noEmit` — the bad call still compiled, which set up the next
+   leaf, but the return type stopped being `any`.
 
-**Multiple type parameters** — functions can declare more than one type
-parameter. Order matters for inference — leading parameters infer first,
-trailing ones must be explicit.
-```ts
-function pair<T, U>(first: T, second: U): [T, U] {
-  return [first, second];
-}
-```
+**Why it worked.** The `any` on the parameter was erasing the caller's type
+before it could ever be checked — `any` is assignable both to and from
+everything, so the compiler had nothing left to compare. A type parameter
+keeps the caller's actual type flowing through the function instead of
+flattening it, which is why the return type became useful immediately even
+though the argument check didn't tighten yet.
 
-**Optional type parameters** — default types for when the caller doesn't
-specify:
-```ts
-function createMap<K, V = string>(): Map<K, V> { ... }
-```
+**Why this is the standard answer.** This is *generic type parameters* — the
+industry-standard way to write a function that is polymorphic over its input
+without giving up type information. The trade-off it buys: you keep one
+implementation instead of N overloads, and pay for it with a signature the
+caller has to be able to infer.
 
-### Full coverage checklist
+**Depth written to the subject file.** Type parameters, call-site inference,
+explicit type arguments, generic arrow function syntax, and what you can't do
+with a type parameter (`new T()`, `instanceof T`) — all written to
+`TypeScript-Generics.md` under Key Concepts.
 
-Every subtopic in this composition part. Nothing skipped:
+**Understanding check.** Asked what would happen if only the return type had
+been changed to `T` and the parameter left `any`. User answered correctly
+(inference has nothing to infer *from*, `T` falls back to `unknown`) — which
+is the exact setup for the next leaf.
 
-- [x] Declaring type parameters (`<T>`)
-- [x] Inference from arguments
-- [x] Constraints (`extends`)
-- [x] Multiple type parameters and inference order
-- [x] Default type parameters
-- [x] Explicit type argument syntax (`identity<string>(...)`)
-- [x] Generic arrow functions (`const fn = <T>(x: T) => x`)
-- [x] What you CAN'T do with generics (no `new T()`, no `instanceof T`)
-
-### Edge cases discussed
-- What happens when no argument matches the constrained position
-- Inference with union arguments: `identity<string | number>("hello")` infers
-  `T = string | number` only if the argument is typed that way
-- Inference fails with conflicting candidates — TS errors, doesn't pick one
-
-### Exercise & outcome
-User wrote `first<T>(arr: T[]): T | undefined` — handled empty array case.
-Then wrote `merge<T extends object, U extends object>(a: T, b: U): T & U`.
-Got both right; minor stumble on empty-array return type.
-
-### Notes
-Understood inference quickly. Constraints needed an extra example — the "why"
-clicked when we compared `{ id: number }` vs `extends { id: number }` side
-by side.
-
-## Part 2: Generic interfaces — in progress
+### Leaf 1.2: You add `<T>` but every call site infers `T = unknown` — in progress
 
 ...
 
@@ -92,11 +75,9 @@ by side.
 
 | Area | Rating | Notes |
 |---|---|---|
-| Generic functions | Mastered | Strong on inference and constraints |
-| Generic interfaces | Proficient | Understands mapped types but slow to apply |
-| Conditional types | Needs work | Confuses distributive behavior |
-| Generic classes | Not yet evaluated | — |
-| Advanced patterns | Not yet evaluated | — |
+| Diagnose the misuse | Mastered | Strong on inference and where `any` erases checks |
+| Constrain the signature | Proficient | Understands mapped types but slow to apply |
+| Fix inference at call sites | Needs work | Confuses distributive behavior |
 
 ### Recommendations
 
@@ -108,27 +89,38 @@ by side.
 
 ## Rules
 
-- **Write the full knowledge, not highlights** — after teaching a concept,
-  record every explanation, code example, edge case, variant, connection to
-  other concepts, and common mistake discussed. Someone reading this file
-  should be able to learn the material, not just see a list of topic names.
-- **Coverage checklist required** — each part must include a checklist of
-  EVERY subtopic that falls under it. Mark each as taught. The checklist
-  ensures nothing slips through. Audit it before marking a part done.
-- **One part at a time** — don't teach the next until the current one clicks
-- **Code examples are essential** — include every code snippet written or
-  shown. The user will review these later; seeing the actual code is better
-  than reading a description of it.
+- **Organized by leaf, in taught order** — one `### Leaf N.M: <the symptom>`
+  section per leaf, under its part, in the sequence the user actually worked
+  through. Never regroup the record by concept, and never split it into a
+  "concepts" section plus a separate "exercises" section — the resolution IS
+  the exercise, and the concept IS the explanation of that resolution
+- **Record all four beats** — every leaf section carries **what went wrong**,
+  **how we fixed it**, **why it worked** (the mechanism), and **why this is
+  the standard answer** (the named concept plus its trade-off). A leaf
+  section missing the "why" halves is incomplete no matter how detailed the
+  steps are
+- **Write the full knowledge, not highlights** — record every command run,
+  code example, error message, edge case, variant, connection, and common
+  mistake discussed. Someone reading this file should be able to follow the
+  same path themselves, not just see a list of topic names
+- **Show the chain** — each leaf section should make clear how its symptom
+  followed from the previous leaf's fix. If it doesn't, say so plainly rather
+  than inventing a link — an unchained leaf is a signal the composition needs
+  reshaping (see compositions.md)
+- **Code examples are essential** — include every snippet written or shown,
+  and the actual output/error where it matters. The user will review these
+  later; seeing the real code and the real error beats a description of them
 - **Don't skip the "boring" parts** — a concept's edge cases, limitations,
   and what-you-can't-do are often more valuable than the happy path. Cover
-  them and record them.
-- **Exercise every part** — the user must apply the concept, not just hear
-  about it. Record what they built and how it went.
+  them, and point at the subject file where the exhaustive version lives
+- **Point at the depth, don't duplicate it** — the leaf section names what
+  was written to `<Subject>.md`; the full treatment lives there, not here
 - **Evaluation is honest** — "Needs work" is more useful than polite
-  "Proficient". The point is to find gaps.
+  "Proficient". The point is to find gaps
 - **Recommendations are actionable** — "Study more" is useless. "Rebuild the
-  generic `Promise.all` type from scratch" is concrete.
-- **Mark progress clearly** — each part is `done`, `in progress`, or `not started`
+  generic `Promise.all` type from scratch" is concrete
+- **Mark progress clearly** — each leaf and each part is `done`,
+  `in progress`, or `not started`
 - **Complete the linked besmart task on mastery** — besmart's `plan_tasks`
   are a WBS tree; only leaves carry completion state (a parent's checkmark
   is derived from its children). As each `(leaf #N)`-tagged sub-item is
@@ -139,5 +131,5 @@ by side.
   complete-plan <plan_id>`. Don't batch any of this for Phase 4 — besmart's
   dashboard/streak should reflect progress as it happens
 - **Update as you teach** — don't batch the write for the end. After each
-  concept, add it to steps.md while it's fresh. The user can review at any
-  point and see current progress.
+  leaf, add its section to steps.md while it's fresh. The user can review at
+  any point and see current progress

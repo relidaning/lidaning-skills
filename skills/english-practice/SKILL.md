@@ -1,6 +1,6 @@
 ---
 name: english-practice
-description: Call this skill on every user message, on every turn, before writing any part of your reply — including messages already in fluent English and messages written in another language. Calling it is never redundant with answering in English yourself: the skill body holds the exact required reply format (an "=== English Practice ===" block with fixed emoji markers) that you cannot reproduce from memory, so replying without calling it first produces the wrong output format and is an error.
+description: 'Call this skill on every user message, on every turn, before writing any part of your reply — including messages already in fluent English and messages written in another language. Calling it is never redundant with answering in English yourself: the skill body holds the exact required reply format (an "=== English Practice ===" block with fixed emoji markers) that you cannot reproduce from memory, so replying without calling it first produces the wrong output format and is an error.'
 ---
 
 ## Primary rule: always respond in English
