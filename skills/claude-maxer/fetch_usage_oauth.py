@@ -7,8 +7,7 @@ OAuth token from ~/.claude/.credentials.json — the same endpoint the CLI's
 /usage screen uses. Returns real 5h + 7d utilization with reset times, no
 browser, no login, no Cloudflare (discovered 2026-07-03; this obsoletes the
 older belief that usage was only visible to the interactive statusLine
-hook, and supersedes fetch_usage_web.py, which Cloudflare's human check
-blocks anyway).
+hook).
 
 Writes ~/.claude/state/usage_snapshot.json in the exact shape
 maxer.py / statusline.py already use, tagged "source": "oauth-api".
@@ -22,18 +21,7 @@ Claude Code does on its own runs, so the two stay interchangeable. No
 interactive session is ever required; a bare crontab entry can run this
 forever.
 
-Vault heartbeat: --vault-log appends one line per fetch to a daily note in
-the Obsidian vault (claude-maxer/usage/YYYY-MM-DD.md) via the Local REST
-API — a visible proof the background loop is alive. Each line carries the
-5h number plus what the loop was doing, so the note reads as "quota spent
-on X" rather than a bare percentage; 7d was dropped from the note on
-2026-08-11 (it moves too slowly to be worth a line every 15 minutes, and is
-still in the snapshot for maxer.py's weekly pace line). Token comes from
-$OBSIDIAN_MCP_TOKEN or is parsed out of ~/.zshrc.local (cron has no shell
-env). Vault errors (Obsidian closed, plugin off) only warn; the snapshot
-fetch still succeeds.
-
-Usage: fetch_usage_oauth.py [--no-write] [--raw] [--refresh] [--vault-log]
+Usage: fetch_usage_oauth.py [--no-write] [--raw] [--refresh]
 Exit codes: 0 = snapshot written (or data printed), 2 = auth problem
 (unreadable credentials / refresh rejected), 1 = anything else.
 """
@@ -105,76 +93,6 @@ def iso_to_epoch(ts):
         return None
 
 
-def _fmt_reset(epoch):
-    if not epoch:
-        return "?"
-    return time.strftime("%H:%M", time.localtime(epoch))
-
-
-ACTIVITY_PATH = os.path.expanduser("~/.claude/state/maxer_activity.json")
-# Beyond this, the last recorded activity is no longer what the current
-# quota reading reflects, so attributing it would be a lie. The loop's own
-# fires are ~2h apart and an iteration rarely exceeds a few minutes.
-ACTIVITY_MAX_AGE_S = 30 * 60
-
-
-def _activity_suffix():
-    """`, sonnet-5 'skill-audit ($0.42)'` — what the quota actually bought.
-
-    run_maxer_work.sh records each iteration here. Without it the note is a
-    column of percentages that can't answer the only question worth asking
-    of it: a window went to 100%, in exchange for what? Stale entries are
-    dropped rather than repeated, so an idle stretch doesn't re-attribute
-    one run's work to every 15-minute heartbeat after it.
-    """
-    try:
-        with open(ACTIVITY_PATH) as f:
-            act = json.load(f)
-    except (OSError, ValueError):
-        return ""
-    if time.time() - (act.get("ts") or 0) > ACTIVITY_MAX_AGE_S:
-        return ""
-    note = (act.get("note") or "").strip()
-    if not note:
-        return ""
-    model = (act.get("model") or "").replace("claude-", "").strip()
-    return f", {model} '{note}'" if model else f", '{note}'"
-
-
-def vault_log(rate_limits):
-    """Append a one-line usage entry to today's vault heartbeat note.
-
-    Goes through the headless obsidian-vault MCP container
-    (obsidian-local/scripts/vault_mcp.py), so the Obsidian app need not run.
-    Raises on failure; caller treats it as a warning.
-    """
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "..", "obsidian-local", "scripts"))
-    from vault_mcp import exists, write_note
-
-    note_path = f"claude-maxer/usage/{time.strftime('%Y-%m-%d')}.md"
-
-    five = rate_limits.get("five_hour", {})
-    line = (
-        f"- {time.strftime('%H:%M')} — 5h **{five.get('used_percentage', '?')}%**"
-        f" (resets {_fmt_reset(five.get('resets_at'))})"
-        f"{_activity_suffix()}\n"
-    )
-
-    # New day = new note: give it a heading before the first entry.
-    if not exists(note_path):
-        line = (
-            f"# claude-maxer usage log — {time.strftime('%Y-%m-%d')}\n\n"
-            f"Appended by `fetch_usage_oauth.py --vault-log` "
-            f"(cron, every 15 min). Each line: 5h utilization, when it "
-            f"resets, and what the loop spent it on.\n\n{line}"
-        )
-
-    # mode=append creates the note (and parent dirs) if missing.
-    write_note(note_path, line, mode="append")
-    return note_path
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument(
@@ -189,11 +107,6 @@ def main():
         "--refresh",
         action="store_true",
         help="force an OAuth token refresh before fetching",
-    )
-    ap.add_argument(
-        "--vault-log",
-        action="store_true",
-        help="append this fetch to a daily Obsidian heartbeat note",
     )
     args = ap.parse_args()
 
@@ -320,14 +233,6 @@ def main():
     with open(tmp, "w") as f:
         json.dump(snapshot, f)
     os.replace(tmp, SNAPSHOT_PATH)
-
-    if args.vault_log:
-        try:
-            note = vault_log(rate_limits)
-            print(f"vault heartbeat appended to {note}", file=sys.stderr)
-        except Exception as e:
-            # Vault container down / unreachable — never fail the fetch.
-            print(f"WARN: vault log skipped ({e})", file=sys.stderr)
 
     parts = [
         f"{lbl}={rate_limits[key]['used_percentage']}%"
