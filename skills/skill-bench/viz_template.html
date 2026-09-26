@@ -1,0 +1,270 @@
+<title>Skill Bench Results</title>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9; --surface: #ffffff; --line: #e1e4ea; --grid: #eceef2;
+  --ink: #111418; --ink-2: #4a505c; --ink-3: #7a8190;
+  --accent: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834;
+  --good: #0ca30c; --bad: #d03b3b; --warn: #fab219;
+  --good-bg: #e6f5e6; --bad-bg: #fbe9e9; --warn-bg: #fdf3dc;
+  --cell-empty: #eceef2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #131519; --surface: #1b1e23; --line: #2d3139; --grid: #262a31;
+    --ink: #f2f3f5; --ink-2: #b9bec8; --ink-3: #868d9a;
+    --accent: #3987e5; --s1: #3987e5; --s2: #d95926;
+    --good-bg: #16301a; --bad-bg: #3a1d1d; --warn-bg: #3a2f14; --cell-empty: #2a2e35;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131519; --surface: #1b1e23; --line: #2d3139; --grid: #262a31;
+  --ink: #f2f3f5; --ink-2: #b9bec8; --ink-3: #868d9a;
+  --accent: #3987e5; --s1: #3987e5; --s2: #d95926;
+  --good-bg: #16301a; --bad-bg: #3a1d1d; --warn-bg: #3a2f14; --cell-empty: #2a2e35;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 "IBM Plex Sans", system-ui, sans-serif; margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 48px; display: grid; gap: 24px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.mono, code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
+.muted { color: var(--ink-3); }
+.sub { color: var(--ink-2); }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tab { font: inherit; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.tab[aria-selected="true"] { border-color: var(--accent); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.tab:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select { font: inherit; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; max-width: 100%; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-3); font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.row { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.tiles { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tile { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px; align-content: start; }
+.tile .k { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.tile .v { font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.tile .ci { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; width: fit-content; }
+.pill.PASS { background: var(--good-bg); color: var(--ink); } .pill.PASS::before { content: "✓"; color: var(--good); }
+.pill.FAIL { background: var(--bad-bg); color: var(--ink); } .pill.FAIL::before { content: "✗"; color: var(--bad); }
+.pill.INCOMPLETE { background: var(--warn-bg); color: var(--ink); } .pill.INCOMPLETE::before { content: "!"; color: var(--warn); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+svg text { fill: var(--ink-2); font: 11px "IBM Plex Sans", system-ui, sans-serif; }
+svg .val { fill: var(--ink); font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+.grid-cases { display: grid; gap: 4px; }
+.case-row { display: grid; grid-template-columns: 96px auto 1fr; gap: 10px; align-items: center; padding: 3px 0; }
+.cells { display: flex; gap: 3px; }
+.cell { width: 22px; height: 22px; border-radius: 4px; display: grid; place-items: center; font-size: 12px; font-weight: 600; cursor: default; border: 0; padding: 0; }
+.cell.ok { background: var(--good-bg); color: var(--good); }
+.cell.no { background: var(--bad-bg); color: var(--bad); }
+.cell.err { background: var(--cell-empty); color: var(--ink-3); }
+.cell:focus-visible { outline: 2px solid var(--accent); }
+.prompt { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tag { font-size: 11px; color: var(--ink-3); }
+#tip { position: fixed; z-index: 10; max-width: min(420px, calc(100vw - 32px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 12px; pointer-events: none; display: grid; gap: 4px; }
+#tip[hidden] { display: none; }
+#tip b { font-weight: 600; }
+.empty { color: var(--ink-3); font-style: italic; }
+.reasons { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.warns { margin: 0; padding: 10px 12px 10px 30px; background: var(--warn-bg); border-radius: 8px; color: var(--ink); display: grid; gap: 4px; }
+@media (prefers-reduced-motion: no-preference) { .bar { transition: width .3s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div style="display:grid;gap:6px">
+      <h1>Skill Bench Results</h1>
+      <div class="tabs" role="tablist" id="tabs"></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      <label class="sub" style="display:grid;gap:4px;font-size:12px">Run
+        <select id="runSel"></select>
+      </label>
+      <label class="sub" style="display:grid;gap:4px;font-size:12px" id="modelWrap">Model
+        <select id="modelSel"></select>
+      </label>
+    </div>
+  </header>
+  <div class="meta" id="meta"></div>
+  <div id="verdict" style="display:grid;gap:8px"></div>
+  <div class="tiles" id="tiles"></div>
+  <div class="row">
+    <section class="panel" id="catPanel"><h2>Trigger fire rate by category</h2><div class="legend"><span><i style="background:var(--s1)"></i>should fire (target 100%)</span><span><i style="background:var(--s2)"></i>should not fire (target 0%)</span></div><div id="cats"></div></section>
+    <section class="panel"><h2>Confusion matrix</h2><div id="cm"></div></section>
+  </div>
+  <section class="panel" id="behPanel"><h2>Behavior score per case</h2><div class="legend" id="behLegend"></div><div class="scroll" id="beh"></div></section>
+  <section class="panel"><h2>Every trial</h2><div class="sub" style="font-size:12px">One square per trial. ✓ correct, ✗ wrong, · errored. Behavior cases show with-skill trials first, then the no-skill baseline after a gap. Hover or focus a square to see the prompt, the skills that fired, and the reply.</div><div class="grid-cases" id="cases"></div></section>
+  <section class="panel"><h2>History</h2><div class="scroll" id="hist"></div></section>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const $ = s => document.querySelector(s);
+const pct = (x, d = 0) => x == null || Number.isNaN(x) ? "—" : (x * 100).toFixed(d) + "%";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ci = c => c && c[0] != null && !Number.isNaN(c[0]) ? `95% CI ${pct(c[0])}–${pct(c[1])}` : "";
+let suiteName = null, runIdx = 0, modelName = null;
+const sd = d => !d ? "" : `${d.delta >= 0 ? "+" : ""}${pct(d.delta, 1)}` + (d.ci && d.ci[0] != null && !Number.isNaN(d.ci[0]) ? ` · 95% CI ${pct(d.ci[0])} to ${pct(d.ci[1])}` : "") + (d.significant ? "" : " · not significant");
+try { suiteName = localStorage.getItem("sb-suite"); } catch (e) {}
+const suites = Object.keys(DATA.suites);
+if (!suites.includes(suiteName)) suiteName = suites[0];
+
+const tip = $("#tip");
+function showTip(el, html) {
+  tip.innerHTML = html; tip.hidden = false;
+  const r = el.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = Math.min(window.innerWidth - tw - 16, Math.max(16, r.left + r.width / 2 - tw / 2));
+  let y = r.bottom + 8; if (y + th > window.innerHeight - 8) y = r.top - th - 8;
+  tip.style.left = x + "px"; tip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tip.hidden = true; }
+function bindTip(el, html) {
+  el.addEventListener("mouseenter", () => showTip(el, html)); el.addEventListener("mouseleave", hideTip);
+  el.addEventListener("focus", () => showTip(el, html)); el.addEventListener("blur", hideTip);
+}
+
+function renderTabs() {
+  $("#tabs").innerHTML = suites.map(s => `<button class="tab" role="tab" aria-selected="${s === suiteName}" data-s="${esc(s)}">${esc(s)}</button>`).join("");
+  $("#tabs").querySelectorAll(".tab").forEach(b => b.onclick = () => { suiteName = b.dataset.s; runIdx = 0; modelName = null; try { localStorage.setItem("sb-suite", suiteName); } catch (e) {} render(); });
+  const runs = DATA.suites[suiteName].runs;
+  $("#runSel").innerHTML = runs.map((r, i) => `<option value="${i}">${esc(r.manifest.run_id)} · ${esc(r.manifest.split)}${r.manifest.frozen ? "" : " · smoke"}</option>`).join("");
+  $("#runSel").value = runIdx;
+}
+$("#runSel").onchange = e => { runIdx = +e.target.value; modelName = null; render(); };
+$("#modelSel").onchange = e => { modelName = e.target.value; render(); };
+
+function render() {
+  renderTabs();
+  const S = DATA.suites[suiteName], run = S.runs[runIdx];
+  if (!run) { $("#tiles").innerHTML = `<div class="tile empty">No runs yet for this suite.</div>`; return; }
+  const models = Object.keys(run.summary.by_model);
+  if (!models.includes(modelName)) modelName = models[0];
+  $("#modelSel").innerHTML = models.map(x => `<option>${esc(x)}</option>`).join("");
+  $("#modelSel").value = modelName;
+  $("#modelWrap").hidden = models.length < 2;
+  const m = run.manifest, model = modelName, s = run.summary.by_model[model];
+  const t = s.trigger, b = s["behavior_skill"], nb = s["behavior_no-skill"];
+  $("#meta").innerHTML = [
+    `suite <b>v${esc(m.suite_version)}</b> · cases <code>${esc(m.cases_sha256.slice(0, 12))}</code>`,
+    `SKILL.md <code>${esc(m.skill_sha256.slice(0, 12))}</code>${m.skill_git_dirty ? " (uncommitted)" : ""}`,
+    `model <b>${esc(model)}</b>${s.served_models?.length ? " → " + esc(s.served_models.join(", ")) : ""}`,
+    `split <b>${esc(m.split)}</b> · k=${m.k}`, `judge ${esc(m.judge_model)}`, esc(m.started.replace("T", " ")),
+  ].map(x => `<span>${x}</span>`).join("");
+  $("#verdict").innerHTML = `<span class="pill ${esc(s.verdict)}">${esc(s.verdict)}</span>` +
+    (s.verdict_reasons?.length ? `<ul class="reasons">${s.verdict_reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "") +
+    (s.warnings?.length ? `<ul class="warns" aria-label="Read before trusting the verdict">${s.warnings.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "");
+  const tiles = [
+    ["Composite", pct(s.composite, 1), "mean of trigger F1 and behavior score"],
+    ["Trigger F1", t ? pct(t.f1, 1) : "—", t ? `P ${pct(t.precision)} · R ${pct(t.recall)}` + (t.f1_ci && t.f1_ci[0] !== t.f1_ci[1] && ci(t.f1_ci) ? ` · ${ci(t.f1_ci)}` : "") : ""],
+    ["False-positive rate", t ? pct(t.fpr, 1) : "—", t ? ci(t.fpr_ci) : ""],
+    ["Behavior score", b ? pct(b.mean_score, 1) : "—", b ? ci(b.mean_score_ci) : "no behavior cases"],
+    ["Pass rate", b ? pct(b.pass_rate) : "—", b ? `pass@k ${pct(b.pass_at_k)} · pass^k ${pct(b.pass_all_k)}` : ""],
+    ["Uplift vs no skill", s.uplift ? (s.uplift.mean_score >= 0 ? "+" : "") + pct(s.uplift.mean_score, 1) : "—", s.uplift ? (s.uplift.paired ? sd(s.uplift.paired).replace(/^[^·]*· /, "") : `pass rate ${(s.uplift.pass_rate >= 0 ? "+" : "") + pct(s.uplift.pass_rate)}`) : "run with --baseline"],
+    ["Cost", "$" + s.cost_usd.toFixed(2), `${s.n_trials} trials · ${s.n_error} errors`],
+    ...(s.headroom?.n_cases ? [["Headroom", `${s.headroom.n_cases - s.headroom.solved_cases}/${s.headroom.n_cases}`, "cases missed at least once"]] : []),
+  ];
+  $("#tiles").innerHTML = tiles.map(([k, v, c]) => `<div class="tile"><span class="k">${k}</span><span class="v">${v}</span><span class="ci">${esc(c)}</span></div>`).join("");
+  renderCats(t); renderCM(t); renderBeh(b, nb); renderCases(run, S, model); renderHist(S);
+}
+
+function renderCats(t) {
+  const el = $("#cats");
+  if (!t) { el.innerHTML = `<p class="empty">No trigger cases in this run.</p>`; return; }
+  const cats = Object.entries(t.categories).sort((a, b) => (a[1].label > b[1].label ? -1 : 1) || a[0].localeCompare(b[0]));
+  const W = 460, rowH = 26, L = 110, R = 60, H = cats.length * rowH + 24, x = v => L + v * (W - L - R);
+  let g = "";
+  [0, .5, 1].forEach(v => { g += `<line x1="${x(v)}" x2="${x(v)}" y1="0" y2="${H - 18}" stroke="var(--grid)"/><text x="${x(v)}" y="${H - 4}" text-anchor="middle">${v * 100}%</text>`; });
+  cats.forEach(([name, v], i) => {
+    const y = i * rowH + 4, rate = v.fired / v.n, col = v.label === "positive" ? "var(--s1)" : "var(--s2)";
+    const good = v.label === "positive" ? rate === 1 : rate === 0;
+    g += `<text x="${L - 8}" y="${y + 13}" text-anchor="end">${esc(name)}</text>`;
+    g += `<rect x="${L}" y="${y + 2}" width="${W - L - R}" height="16" fill="transparent" class="hit" data-i="${i}"/>`;
+    const w = Math.max(rate > 0 ? 4 : 0, x(rate) - L);
+    if (w > 0) g += `<rect x="${L}" y="${y + 3}" width="${w}" height="14" rx="3" fill="${col}"/>`;
+    g += `<text class="val" x="${x(rate) + 6}" y="${y + 14}">${v.fired}/${v.n}${good ? "" : " ⚠"}</text>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%;height:auto" role="img" aria-label="Trigger fire rate per category">${g}</svg>`;
+  el.querySelectorAll(".hit").forEach(r => { const [n, v] = cats[+r.dataset.i]; bindTip(r, `<b>${esc(n)}</b> (${v.label})<span>fired in ${v.fired} of ${v.n} trials — target ${v.label === "positive" ? "all" : "none"}</span>`); });
+}
+
+function renderCM(t) {
+  const el = $("#cm");
+  if (!t) { el.innerHTML = `<p class="empty">No trigger cases in this run.</p>`; return; }
+  const cell = (n, label, good) => `<td style="text-align:center;padding:14px;background:${n === 0 ? "transparent" : good ? "var(--good-bg)" : "var(--bad-bg)"}"><div style="font-size:24px;font-weight:500">${n}</div><div class="tag">${label}</div></td>`;
+  el.innerHTML = `<table><tr><th></th><th style="text-align:center">fired</th><th style="text-align:center">didn't fire</th></tr>
+    <tr><th>should fire</th>${cell(t.tp, "true positive", true)}${cell(t.fn, "missed", false)}</tr>
+    <tr><th>shouldn't fire</th>${cell(t.fp, "false alarm", false)}${cell(t.tn, "true negative", true)}</tr></table>
+    <div class="sub" style="font-size:12px">Accuracy ${pct(t.accuracy, 1)} · run-to-run consistency ${pct(t.consistency)} · fired before other work in ${pct(t.before_work_rate)} of hits</div>`;
+}
+
+function renderBeh(b, nb) {
+  const el = $("#beh");
+  $("#behPanel").hidden = !b;
+  if (!b) return;
+  $("#behLegend").innerHTML = `<span><i style="background:var(--s1)"></i>with skill</span>` + (nb ? `<span><i style="background:var(--s2)"></i>no-skill baseline</span>` : "") + `<span class="muted">each dot is one trial · line spans that case's trials</span>`;
+  const ids = Object.keys(b.per_case), W = 640, L = 90, R = 24, rowH = nb ? 40 : 26, H = ids.length * rowH + 26, x = v => L + v * (W - L - R);
+  let g = "";
+  [0, .25, .5, .75, 1].forEach(v => { g += `<line x1="${x(v)}" x2="${x(v)}" y1="0" y2="${H - 18}" stroke="var(--grid)"/><text x="${x(v)}" y="${H - 4}" text-anchor="middle">${v * 100}%</text>`; });
+  const series = (pc, y, col, lab, id) => {
+    if (!pc) return "";
+    const sc = pc.scores, lo = Math.min(...sc), hi = Math.max(...sc);
+    let o = `<line x1="${x(lo)}" x2="${x(hi)}" y1="${y}" y2="${y}" stroke="${col}" stroke-width="2" opacity=".5"/>`;
+    sc.forEach((v, k) => { o += `<circle cx="${x(v)}" cy="${y}" r="5" fill="${col}" stroke="var(--surface)" stroke-width="2" class="dot" data-t="${esc(`<b>${id}</b> · ${lab} · trial ${k + 1}<span>score ${pct(v)} — ${pc.passes}/${pc.n} trials passed</span>`)}"/>`; });
+    return o;
+  };
+  ids.forEach((id, i) => {
+    const y0 = i * rowH + 12;
+    g += `<text x="${L - 10}" y="${y0 + (nb ? 10 : 4)}" text-anchor="end" class="mono">${esc(id)}</text>`;
+    g += series(b.per_case[id], y0, "var(--s1)", "with skill", id);
+    if (nb) g += series(nb.per_case[id], y0 + 16, "var(--s2)", "no skill", id);
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%;min-width:420px;height:auto" role="img" aria-label="Behavior score per case">${g}</svg>`;
+  el.querySelectorAll(".dot").forEach(d => bindTip(d, d.dataset.t));
+}
+
+function renderCases(run, S, model) {
+  const byCase = {};
+  run.trials.forEach(r => { if (!r.case_id || (r.model && r.model !== model)) return; (byCase[r.case_id] ||= []).push(r); });
+  const cases = S.cases.filter(c => byCase[c.id]);
+  const rows = cases.map(c => {
+    const trials = byCase[c.id].sort((a, b) => (a.cond === b.cond ? 0 : a.cond === "skill" ? -1 : 1) || a.trial - b.trial);
+    const cells = trials.map((r, k) => {
+      let cls = "err", sym = "·";
+      if (r.status === "ok") { const good = r.type === "trigger" ? r.correct : r.pass; cls = good ? "ok" : "no"; sym = good ? "✓" : "✗"; }
+      const detail = r.status !== "ok" ? `<span>${esc(r.status)}: ${esc(String(r.error || "").slice(0, 160))}</span>` :
+        r.type === "trigger" ? `<span>fired: <b>${r.triggered ? "yes" : "no"}</b> (want ${c.label === "positive" ? "yes" : "no"})</span>` :
+        `<span>score ${pct(r.score)} · gates ${r.gates_pass ? "passed" : "failed"}</span>` + (r.judge?.criteria || []).filter(x => !x.met).map(x => `<span>✗ ${esc(x.id)}: ${esc(x.evidence)}</span>`).join("");
+      const html = `<b>${esc(c.id)}</b> · ${esc(r.cond)} · trial ${r.trial}<span class="muted">${esc(c.prompt)}</span>${detail}<span>skills: ${esc((r.skill_calls || []).join(", ") || "none")}</span>` +
+        (r.reply_excerpt ? `<span class="muted">“${esc(r.reply_excerpt.slice(0, 220))}…”</span>` : "");
+      return `<button class="cell ${cls}" data-h="${esc(html)}" aria-label="${esc(c.id)} ${r.cond} trial ${r.trial}: ${cls === "ok" ? "correct" : cls === "no" ? "wrong" : "error"}"${r.cond === "no-skill" && k && trials[k - 1].cond !== r.cond ? ' style="margin-left:8px"' : ""}>${sym}</button>`;
+    }).join("");
+    const tag = c.type === "trigger" ? `${c.label} · ${c.category}` : "behavior";
+    return `<div class="case-row"><span class="mono">${esc(c.id)}</span><span class="cells">${cells}</span><span class="prompt"><span class="tag">${esc(tag)}</span> ${esc(c.prompt)}</span></div>`;
+  });
+  $("#cases").innerHTML = rows.join("") || `<p class="empty">No trials.</p>`;
+  $("#cases").querySelectorAll(".cell").forEach(el => bindTip(el, el.dataset.h));
+}
+
+function renderHist(S) {
+  const h = S.history;
+  if (!h.length) { $("#hist").innerHTML = `<p class="empty">No completed frozen runs in history yet.</p>`; return; }
+  const cols = [["date", "Date"], ["model", "Model"], ["suite_version", "Suite"], ["skill_sha256", "SKILL.md"], ["trigger_f1", "Trigger F1"], ["fpr", "FPR"], ["behavior_mean", "Behavior"], ["uplift", "Uplift"], ["composite", "Composite"], ["verdict", "Verdict"], ["cost_usd", "Cost"]];
+  const f = (k, v) => v == null ? "—" : ["trigger_f1", "fpr", "behavior_mean", "uplift", "composite"].includes(k) ? pct(v, 1) : k === "cost_usd" ? "$" + (+v).toFixed(2) : k === "verdict" ? `<span class="pill ${esc(v)}">${esc(v)}</span>` : k === "skill_sha256" ? `<code>${esc(v)}</code>` : esc(v);
+  const g = (k, r) => f(k, r[k]) + (k === "uplift" && r.uplift_significant === false ? ' <span class="muted">(n.s.)</span>' : "");
+  $("#hist").innerHTML = `<table><tr>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>${h.slice().reverse().map(r => `<tr>${cols.map(([k]) => `<td>${g(k, r)}</td>`).join("")}</tr>`).join("")}</table>`;
+}
+render();
+</script>

@@ -23,3 +23,5 @@ skills:
     path: skills/skillopt
   - name: vault-tasks
     path: skills/vault-tasks
+  - name: skill-bench
+    path: skills/skill-bench

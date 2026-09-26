@@ -1,0 +1,4 @@
+name: skill-bench
+description: Standard benchmark for a skill — builds a frozen, versioned dataset (trigger + behavior cases, dev/test split) and scoring method if missing, runs headless trials, reports F1, rubric scores, pass@k and CIs with run history.
+scope: project
+tags: [meta, skills, benchmark, evaluation]

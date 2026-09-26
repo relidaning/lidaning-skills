@@ -47,6 +47,7 @@ These skills auto-invoke — you don't need `/slash` commands:
 | `context-summarize`  | project | "Summarize this", "tl;dr", "catch me up", "condense this", or recap requests on pasted text, a file, a URL, or the conversation so far. Returns compact text as the reply — no file writes, no session state. Not `/compact`, not `coding-orchestrate`'s SESSION.md.                                     |
 | `skillopt`           | project | "Optimize/improve/fix skill X toward goal Y", "audit my skills", "score my skills", or `/skillopt`. Runs a bounded, validation-gated edit loop against a target skill's SKILL.md (or a general audit when no target is given) — see Key Concepts below.                                                  |
 | `vault-tasks`        | project | Questions about the vault-tasks automation, Tasks.md processing status, or "vault-tasks". Local cron (every 30 min) that implements one undone item from the vault's `Tasks.md` at a time in `/data/apps/myfollows`, committing straight to master and checking the item off.                            |
+| `skill-bench`        | project | "Benchmark my X skill", "test skill X", "how about my skill X", "is X any good", before/after comparisons. Builds a frozen, versioned suite (trigger + behavior cases, dev/test split, blind label audit) if none exists, runs headless `claude -p` trials via `skills/skill-bench/bench.py`, reports F1/FPR/rubric score/pass@k with CIs and history. Measures only; hands fixes to `skillopt`. |
 
 ## Adding a skill
 
