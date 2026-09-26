@@ -1,46 +1,30 @@
 #!/usr/bin/env python3
 """
-claude-maxer: pin the 5h usage window to fixed times, then fill each window
-to ~95% during its last hour with news-digest work written to the vault.
+claude-maxer engine. It reads its settings and task list from SKILL.md (next
+to this file) on every run, so editing the skill changes what runs. This file
+holds only the mechanics a model can't be trusted with: reading usage, timing
+against the 5h reset, never opening an off-schedule window, and writing to the
+vault.
 
-Window plan (all times machine-local, CST)
-------------------------------------------
-24h is not a multiple of 5h, so five back-to-back windows can't repeat on
-the same clock times every day. The plan is four pinned windows plus one 4h
-buffer:
+Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
 
-    03:00-08:00   08:00-13:00   13:00-18:00   18:00-23:00   | 23:00-03:00 buffer
+  open    Start a 5h window with a one-word Haiku ping. If a window is still
+          open and resets within 20 min, wait for the reset and ping right
+          after it. If it resets later than that, do nothing.
+  run     Fill the window that is open right now. Start tasks from SKILL.md in
+          batches until 5h reaches the target, 7d crosses its pace line, or
+          the reset is less than 10 min away. Never runs when no window is
+          open, because the first request would open one at the wrong time.
+          Running tasks are killed 2 min before the reset for the same
+          reason.
+  status  Show usage and what `run` would do now.
 
-`open` (cron at 03/08/13/18) starts each window with a one-word Haiku ping.
-If the previous window is still open because it started a few minutes late,
-`open` waits for that reset and pings right after it. Nothing is pinged at
-23:00. A window opened then would run until 04:00 and swallow the 03:00
-window. The buffer is left for interactive use. If you work in it and open a
-window yourself, the 03:00 pin is lost for that day, and the 08:00 pin
-restores the schedule.
-
-`run` (cron every 15 min) does nothing unless a window is open and resets in
-10-65 minutes, so it acts once, in each window's last hour. Then it
-starts digest tasks until one of these stops it:
-
-  * 5h usage reaches TARGET_5H_PCT (95%)
-  * 7d usage reaches its pace line (see weekly_line); the weekly cap is the
-    real bound, since filling every window to 95% would spend the whole week
-    in about three days
-  * the window is within STOP_MARGIN_MIN of resetting. Every task is also
-    killed before the reset: a request after the reset would open an
-    off-schedule window and break the pin.
-
-The window isn't tied to the clock plan, so a window you opened yourself
-also gets filled in its last hour.
-
-Vault output (only written when tasks actually run):
-  claude-maxer/news/YYYY-MM-DD.md            the day's digests, one section per task
-  claude-maxer/log/YYYY-MM-DD.md             one block per run, one line per task
+Vault output (written only when tasks run), under the vault root:
+  claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task
+  claude-maxer/log/YYYY-MM-DD.md    one block per run, one line per task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
-Usage: maxer.py run [--dry-run] | open [--dry-run] | status
-Cron runs these through run_maxer_work.sh, which sets HOME/PATH/proxy.
+Usage: maxer.py run|open|status [--dry-run]
 """
 import argparse
 import fcntl
@@ -55,6 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+SKILL_PATH = os.path.join(SKILL_DIR, "SKILL.md")
 
 STATE_DIR = os.path.expanduser("~/.claude/state")
 SNAPSHOT_PATH = os.path.join(STATE_DIR, "usage_snapshot.json")
@@ -66,35 +51,83 @@ RUN_LOCK = "/tmp/claude-maxer-run.lock"
 # OAuth refresh token, so two fetchers must never overlap.
 FETCH_LOCK = "/tmp/claude-usage-fetch.lock"
 
-TARGET_5H_PCT = float(os.environ.get("MAXER_TARGET_5H", 95))
-WEEKLY_TARGET_PCT = float(os.environ.get("MAXER_WEEKLY_TARGET", 95))
-WEEKLY_SLACK_PCT = float(os.environ.get("MAXER_WEEKLY_SLACK", 5))
-ENTER_MAX_MIN = 65      # start only when the window resets within this many minutes...
-STOP_MARGIN_MIN = 10    # ...and stop starting tasks this close to the reset
-KILL_MARGIN_S = 120     # hard-kill running tasks this long before the reset
-TASK_TIMEOUT_S = 25 * 60
-OVERSHOOT_PCT = 3        # a batch may end at most this far above TARGET_5H_PCT
-CONCURRENCY = int(os.environ.get("MAXER_CONCURRENCY", 3))
-DEFAULT_TASK_PCT = 4.0  # first guess at 5h% per task; replaced by measurement
+# Fixed safety mechanics — deliberately not in SKILL.md.
+STOP_MARGIN_MIN = 10       # stop starting tasks this close to the reset
+KILL_MARGIN_S = 120        # hard-kill running tasks this long before the reset
 SNAPSHOT_MAX_AGE_S = 20 * 60
 OPEN_WAIT_MAX_S = 20 * 60  # opener waits for a reset at most this long
-
-MODEL = os.environ.get("MAXER_MODEL", "claude-opus-5-5")
+DEFAULT_TASK_PCT = 4.0     # first guess at 5h% per task; replaced by measurement
 PING_MODEL = "claude-haiku-4-5-20251001"
-BUDGET_USD = os.environ.get("MAXER_BUDGET_USD", "5")
 
-# (slug, note title, description for the prompt). Rotated across runs so
-# every domain gets its turn; see next_domains().
-DOMAINS = [
-    ("ai", "AI", "AI and machine learning: model releases, research, AI companies, policy"),
-    ("big-tech", "Big tech", "big tech: Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers: products, business, regulation"),
-    ("world", "World", "breaking world news: politics, conflicts, disasters, major international events"),
-    ("security", "Security", "cybersecurity: major breaches, actively exploited vulnerabilities, security research"),
-    ("dev", "Dev & open source", "software development and open source: languages, frameworks, dev tools, notable releases"),
-    ("science", "Science & space", "science and space: research breakthroughs, space missions, health and medicine"),
-    ("markets", "Markets", "markets and economy: central banks, major market moves, macro data, big deals"),
-    ("china-tech", "China tech", "China technology and economy: Chinese tech companies, AI labs, chips, policy"),
-]
+# Fallbacks if SKILL.md's settings block lacks a key. Each key can also be
+# overridden by env MAXER_<KEY> (for manual tests).
+DEFAULTS = {
+    "target_5h": 95.0,
+    "overshoot": 3.0,
+    "weekly_target": 95.0,
+    "weekly_slack": 5.0,
+    "concurrency": 3,
+    "model": "claude-opus-5-5",
+    "budget_usd": "5",
+    "task_timeout_min": 25,
+}
+CFG = dict(DEFAULTS)
+TASKS = []  # [(slug, title, prompt)], loaded from SKILL.md
+
+VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
+
+
+# ── SKILL.md: settings + tasks ─────────────────────────────────────────────
+
+class SkillError(Exception):
+    pass
+
+
+def slugify(title):
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+
+
+def load_skill(path=SKILL_PATH):
+    """Parse the ```maxer-settings block and the `## Tasks` section."""
+    with open(path) as f:
+        text = f.read()
+
+    cfg = dict(DEFAULTS)
+    m = re.search(r"```maxer-settings\n(.*?)```", text, re.S)
+    if m:
+        for line in m.group(1).splitlines():
+            line = line.split("#", 1)[0].strip()
+            if ":" not in line:
+                continue
+            k, v = (s.strip() for s in line.split(":", 1))
+            if k in DEFAULTS:
+                cfg[k] = v
+    for k in DEFAULTS:
+        if f"MAXER_{k.upper()}" in os.environ:
+            cfg[k] = os.environ[f"MAXER_{k.upper()}"]
+    try:
+        for k, d in DEFAULTS.items():
+            cfg[k] = type(d)(cfg[k])
+    except ValueError as e:
+        raise SkillError(f"bad value in maxer-settings: {e}")
+
+    m = re.search(r"^## Tasks[^\n]*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    if not m:
+        raise SkillError("SKILL.md has no '## Tasks' section")
+    tasks = []
+    for block in re.split(r"^### ", m.group(1), flags=re.M)[1:]:
+        title, _, body = block.partition("\n")
+        title, body = title.strip(), body.strip()
+        if title and body:
+            tasks.append((slugify(title), title, body))
+    if not tasks:
+        raise SkillError("the '## Tasks' section has no '### Title' + prompt entries")
+    return cfg, tasks
+
+
+def use_skill():
+    global CFG, TASKS
+    CFG, TASKS = load_skill()
 
 
 # ── small helpers ──────────────────────────────────────────────────────────
@@ -124,7 +157,6 @@ def refresh_snapshot():
 
 
 def read_usage():
-    """Returns dict with five_pct, five_reset, seven_pct, seven_reset, age."""
     with open(SNAPSHOT_PATH) as f:
         snap = json.load(f)
     rl = snap.get("rate_limits", {})
@@ -148,13 +180,14 @@ def window_open(u, now):
 
 
 def weekly_line(u, now):
-    """Highest 7d% allowed right now: the pace needed to land on
-    WEEKLY_TARGET_PCT at the weekly reset, plus a little slack."""
+    """Highest 7d% allowed right now: the even pace that lands on
+    weekly_target at the weekly reset, plus weekly_slack."""
+    tgt = CFG["weekly_target"]
     if not u["seven_reset"]:
-        return WEEKLY_TARGET_PCT
+        return tgt
     week = 7 * 86400
     elapsed = min(max(now - (u["seven_reset"] - week), 0), week) / week
-    return min(WEEKLY_TARGET_PCT, WEEKLY_TARGET_PCT * elapsed + WEEKLY_SLACK_PCT)
+    return min(tgt, tgt * elapsed + CFG["weekly_slack"])
 
 
 def gate(u, now):
@@ -164,48 +197,44 @@ def gate(u, now):
     if not window_open(u, now):
         return False, "no 5h window open (starting work now would open an off-schedule window)"
     left_min = (u["five_reset"] - now) / 60
-    if left_min > ENTER_MAX_MIN:
-        return False, f"window resets {hm(u['five_reset'])}, {left_min:.0f} min away (not the last hour yet)"
     if left_min <= STOP_MARGIN_MIN:
         return False, f"window resets {hm(u['five_reset'])}, only {left_min:.0f} min left"
-    if u["five_pct"] is not None and u["five_pct"] >= TARGET_5H_PCT:
-        return False, f"5h at {u['five_pct']}%, target {TARGET_5H_PCT:.0f}% reached"
+    if u["five_pct"] is not None and u["five_pct"] >= CFG["target_5h"]:
+        return False, f"5h at {u['five_pct']}%, target {CFG['target_5h']:.0f}% reached"
     line = weekly_line(u, now)
     if u["seven_pct"] is not None and u["seven_pct"] >= line:
         return False, f"7d at {u['seven_pct']}%, over its pace line {line:.0f}%"
     return True, "ok"
 
 
-# ── rotation ───────────────────────────────────────────────────────────────
-
-def next_domains(n):
+def next_tasks(n):
+    """Round-robin through SKILL.md's tasks across runs, by title, so
+    editing the list doesn't reset or skip the rotation badly."""
     try:
         with open(ROTATION_PATH) as f:
-            idx = json.load(f).get("next", 0)
+            last = json.load(f).get("last")
     except (OSError, ValueError):
-        idx = 0
-    picked = [DOMAINS[(idx + i) % len(DOMAINS)] for i in range(n)]
+        last = None
+    titles = [t[1] for t in TASKS]
+    idx = titles.index(last) + 1 if last in titles else 0
+    picked = [TASKS[(idx + i) % len(TASKS)] for i in range(min(n, len(TASKS)))]
     with open(ROTATION_PATH, "w") as f:
-        json.dump({"next": (idx + n) % len(DOMAINS)}, f)
+        json.dump({"last": picked[-1][1]}, f)
     return picked
 
 
-# ── vault ──────────────────────────────────────────────────────────────
+# ── vault ──────────────────────────────────────────────────────────────────
 # Plain file appends into the vault folder rather than the obsidian-vault MCP
 # container: on 2026-09-27 that container's sessions hung mid-run (healthz
 # fine, every call timing out) and a finished digest was lost. The vault is a
 # local folder that Nextcloud syncs, so a file write is all a note needs.
-
-VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
-
 
 def note_path(day):
     return f"claude-maxer/news/{day}.md"
 
 
 def covered_titles(path):
-    """Titles already in today's note (any topic), so a later task doesn't
-    repeat them."""
+    """Titles already in today's note, so a later task doesn't repeat them."""
     try:
         with open(os.path.join(VAULT_ROOT, path)) as f:
             return re.findall(r"\*\*\[([^\]]+)\]\(", f.read())
@@ -225,9 +254,23 @@ def vault_append(path, text, heading=None):
         f.write(text)
 
 
-# ── the digest task ────────────────────────────────────────────────────────
+# ── one task ───────────────────────────────────────────────────────────────
 
 PRACTICE_BLOCK = re.compile(r"=== English Practice ===.*?=== English Practice ===\s*", re.S)
+ENTRY = re.compile(r"^\s*\d+\.\s+\*\*\[.+?\]\(https?://", re.M)
+
+# Appended to every SKILL.md task prompt: what the engine needs to parse,
+# dedupe and store the reply. Task authors write only the *what*.
+CONTRACT = (
+    "\n\n---\nYou are running unattended. Your reply is saved verbatim into a notes vault, "
+    "so reply with nothing except a numbered list: no preamble, no closing remarks, no "
+    "English-practice block. You have only WebSearch and WebFetch. Run several different "
+    "searches and open sources to confirm details. Only include an item if you actually saw "
+    "its URL in a search result or opened it; never invent a URL, a date, or a detail.\n\n"
+    "Format, exactly, one entry per item:\n"
+    "1. **[Headline in your own words](https://source.url)** · Source · YYYY-MM-DD\n"
+    "   One or two sentences: what it is and why it matters."
+)
 
 
 def list_only(text):
@@ -244,37 +287,21 @@ def list_only(text):
     return "\n".join(kept).strip()
 
 
-def build_prompt(desc, already):
+def build_prompt(task_prompt, already):
     skip = ""
     if already:
-        skip = ("\n\nThese stories are already in today's note. Do not repeat them, "
-                "even from a different outlet:\n" + "\n".join(f"- {t}" for t in already))
-    return (
-        "You are an unattended news collector. Your reply is saved verbatim into a notes "
-        "vault, so reply with nothing except the list described below: no preamble, "
-        "no closing remarks, no English-practice block.\n\n"
-        f"Topic: {desc}.\n\n"
-        "Find the 10 most important stories on this topic from the last 48 hours, newest "
-        "first. Aim for all 10: run at least six different WebSearch queries (sub-topics, "
-        "companies, regions) and open articles with WebFetch to confirm details. Prefer "
-        "primary or reputable sources. Only include a story if you actually saw its URL in a "
-        "search result or opened it; never invent a URL, a date, or a detail. List fewer "
-        "than 10 only if searching really turns up nothing more.\n\n"
-        "Format, exactly, one entry per story:\n"
-        "1. **[Headline in your own words](https://source.url)** · Outlet · YYYY-MM-DD\n"
-        "   One or two sentences: what happened and why it matters."
-        f"{skip}"
-    )
+        skip = ("\n\nThese items are already in today's note. Do not repeat them, even "
+                "from a different source:\n" + "\n".join(f"- {t}" for t in already))
+    return task_prompt + CONTRACT + skip
 
 
-def run_task(slug, title, desc, day, deadline):
+def run_task(slug, title, prompt, day, deadline):
     path = note_path(day)
-    already = covered_titles(path)
     cmd = [
-        "claude", "-p", build_prompt(desc, already),
-        "--model", MODEL,
+        "claude", "-p", build_prompt(prompt, covered_titles(path)),
+        "--model", CFG["model"],
         "--output-format", "json",
-        "--max-budget-usd", BUDGET_USD,
+        "--max-budget-usd", CFG["budget_usd"],
         # Only web tools exist in the session: nothing to write with, no
         # Skill call for the global english-practice rule to spend turns on,
         # and --strict-mcp-config (with no config) loads no MCP servers.
@@ -283,8 +310,8 @@ def run_task(slug, title, desc, day, deadline):
         "--strict-mcp-config",
     ]
     started = time.time()
-    timeout = max(60, min(TASK_TIMEOUT_S, deadline - started))
-    res = {"slug": slug, "path": path, "start": started, "items": 0, "cost": 0.0}
+    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    res = {"slug": slug, "title": title, "start": started, "items": 0, "cost": 0.0}
     try:
         p = subprocess.run(cmd, cwd=WORK_DIR, stdin=subprocess.DEVNULL, capture_output=True,
                            text=True, timeout=timeout)
@@ -299,14 +326,13 @@ def run_task(slug, title, desc, day, deadline):
         return res
     res["cost"] = float(out.get("total_cost_usd") or 0)
     text = PRACTICE_BLOCK.sub("", out.get("result") or "").strip()
-    entries = re.findall(r"^\s*\d+\.\s+\*\*\[.+?\]\(https?://", text, re.M)
+    entries = ENTRY.findall(text)
     if out.get("is_error") or not entries:
         res["error"] = (out.get("subtype") or "no linked entries in reply")[:120]
         return res
-    text = list_only(text)
-    heading = f"# News — {day}\n\nCollected by claude-maxer, one section per topic run.\n"
+    heading = f"# News — {day}\n\nCollected by claude-maxer, one section per task.\n"
     try:
-        vault_append(path, f"\n## {hm(started)} · {title}\n\n{text}\n", heading=heading)
+        vault_append(path, f"\n## {hm(started)} · {title}\n\n{list_only(text)}\n", heading=heading)
     except Exception as e:
         res["error"] = f"vault write failed: {e}"[:120]
         return res
@@ -333,8 +359,8 @@ def cmd_run(dry_run):
     if dry_run:
         print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
               f"7d {u['seven_pct']}% (line {weekly_line(u, time.time()):.0f}%)")
-        print("next domains:", [d[0] for d in DOMAINS])
-        print(build_prompt(DOMAINS[0][2], [])[:900])
+        print("tasks:", [t[1] for t in TASKS])
+        print(build_prompt(TASKS[0][2], [])[:900])
         return 0
 
     day = datetime.now().strftime("%Y-%m-%d")
@@ -355,38 +381,37 @@ def cmd_run(dry_run):
     per_task = DEFAULT_TASK_PCT
     total_cost, tasks_done = 0.0, 0
     while True:
-        now = time.time()
-        ok, why = gate(u, now)
+        ok, why = gate(u, time.time())
         if not ok:
             break
-        # Never start a task expected to push 5h past the target plus a small
-        # margin: 100% locks the user out until the reset.
-        room = TARGET_5H_PCT + OVERSHOOT_PCT - (u["five_pct"] or 0)
-        n = min(CONCURRENCY, int(room // max(per_task, 0.5)))
+        # Never start a task expected to push 5h past target + overshoot:
+        # 100% locks the user out until the reset.
+        room = CFG["target_5h"] + CFG["overshoot"] - (u["five_pct"] or 0)
+        n = min(CFG["concurrency"], int(room // max(per_task, 0.5)))
         if n < 1:
             why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
             break
-        batch = next_domains(n)
+        batch = next_tasks(n)
         before = u["five_pct"] or 0
-        with ThreadPoolExecutor(max_workers=n) as ex:
-            results = list(ex.map(lambda d: run_task(*d, day, deadline), batch))
+        with ThreadPoolExecutor(max_workers=len(batch)) as ex:
+            results = list(ex.map(lambda t: run_task(*t, day, deadline), batch))
         u = fresh_usage()
         delta = (u["five_pct"] or 0) - before
         if delta > 0:
-            per_task = delta / n
+            per_task = delta / len(batch)
         for r in results:
             total_cost += r["cost"]
             if r.get("error"):
-                line = f"- {hm(r['start'])}–{hm(r['end'])} · {r['slug']} · failed: {r['error']} · ${r['cost']:.2f}\n"
+                line = f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed: {r['error']} · ${r['cost']:.2f}\n"
             else:
                 tasks_done += 1
-                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['slug']} · {r['items']} stories "
+                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
                         f"· ${r['cost']:.2f}\n")
             vault_append(log_note, line)
-            log("task", **{k: v for k, v in r.items() if k != "path"})
-        vault_append(log_note, f"- 5h now {u['five_pct']}% (batch of {n}: +{delta:.0f}pp)\n")
+            log("task", **r)
+        vault_append(log_note, f"- 5h now {u['five_pct']}% (batch of {len(batch)}: +{delta:.0f}pp)\n")
 
-    vault_append(log_note, f"- stopped: {why}. {tasks_done} digests, ${total_cost:.2f}, "
+    vault_append(log_note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
                            f"5h {start_five}% → {u['five_pct']}%\n")
     log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2),
         five_start=start_five, five_end=u["five_pct"])
@@ -434,7 +459,9 @@ def cmd_status():
     ok, why = gate(u, now)
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
           f"  | 7d {u['seven_pct']}%  pace line {weekly_line(u, now):.0f}%")
-    print("would run now" if ok else f"would skip: {why}")
+    print(f"tasks from SKILL.md: {', '.join(t[1] for t in TASKS)}")
+    print(f"settings: {CFG}")
+    print("run would start tasks now" if ok else f"run would skip: {why}")
     return 0
 
 
@@ -443,6 +470,13 @@ def main():
     ap.add_argument("command", choices=["run", "open", "status"])
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+    if a.command in ("run", "status"):
+        try:
+            use_skill()
+        except (OSError, SkillError) as e:
+            # Don't guess at a half-parsed skill: log loudly and do nothing.
+            log("skill_error", error=str(e))
+            return 1
     if a.command == "run":
         return cmd_run(a.dry_run)
     if a.command == "open":
