@@ -3,7 +3,7 @@
 # then hands off to maxer.py, which holds all the logic (window plan, gate,
 # tasks, vault log): see its docstring.
 #
-# Usage: run_maxer_work.sh run|open|status [--dry-run]
+# Usage: run_maxer_work.sh run|open|status [--dry-run] | off [--until WHEN] | on
 
 set -euo pipefail
 

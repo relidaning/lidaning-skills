@@ -22,13 +22,17 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           Running tasks are killed 2 min before the reset for the same
           reason.
   status  Show usage and what `run` would do now.
+  off     Pause: scheduled open/run do nothing (logged as skips) until `on`,
+          or until --until (2h, 3d, 30m, HH:MM, YYYY-MM-DD, "YYYY-MM-DD HH:MM").
+          A run already in progress stops starting new tasks.
+  on      Resume.
 
 Vault output (written only when tasks run), under the vault root:
   claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task
   claude-maxer/log/YYYY-MM-DD.md    one block per run, one line per task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
-Usage: maxer.py run|open|status [--dry-run]
+Usage: maxer.py run|open|status [--dry-run] | off [--until WHEN] | on
 """
 import argparse
 import fcntl
@@ -50,6 +54,7 @@ SNAPSHOT_PATH = os.path.join(STATE_DIR, "usage_snapshot.json")
 LOG_PATH = os.path.join(STATE_DIR, "claude-maxer.log.jsonl")
 ROTATION_PATH = os.path.join(STATE_DIR, "claude-maxer-rotation.json")
 BUDGET_PATH = os.path.join(STATE_DIR, "claude-maxer-day.json")
+PAUSE_PATH = os.path.join(STATE_DIR, "claude-maxer-off.json")  # present = paused
 WORK_DIR = os.path.join(STATE_DIR, "claude-maxer-work")  # neutral cwd: no repo CLAUDE.md
 RUN_LOCK = "/tmp/claude-maxer-run.lock"
 # Shared with the */15 fetch cron: fetch_usage_oauth.py rotates a single-use
@@ -220,8 +225,72 @@ def day_budget(u, now, persist=True):
     return dict(b, new=True)
 
 
+def paused(now):
+    """Reason string if the off switch is set, else None. An expired
+    --until clears the switch."""
+    try:
+        with open(PAUSE_PATH) as f:
+            p = json.load(f)
+    except (OSError, ValueError):
+        return None
+    until = p.get("until")
+    if until and until <= now:
+        os.remove(PAUSE_PATH)
+        log("resumed", reason="pause expired")
+        return None
+    since = datetime.fromtimestamp(p.get("since", now)).strftime("%m-%d %H:%M")
+    end = datetime.fromtimestamp(until).strftime("%m-%d %H:%M") if until else "`maxer.py on`"
+    return f"switched off since {since}, until {end}"
+
+
+def parse_until(s, now):
+    m = re.fullmatch(r"(\d+)\s*([mhd])", s.strip())
+    if m:
+        return now + int(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]]
+    base = datetime.fromtimestamp(now)
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).timestamp()
+        except ValueError:
+            pass
+    try:
+        t = datetime.strptime(s, "%H:%M")
+    except ValueError:
+        raise SystemExit(f"can't parse --until {s!r}: use 2h, 3d, 30m, HH:MM, YYYY-MM-DD "
+                         f"or 'YYYY-MM-DD HH:MM'")
+    ts = base.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0).timestamp()
+    return ts if ts > now else ts + 86400  # next occurrence
+
+
+def cmd_off(until):
+    now = time.time()
+    end = parse_until(until, now) if until else None
+    if end is not None and end <= now:
+        raise SystemExit("--until is in the past")
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(PAUSE_PATH, "w") as f:
+        json.dump({"since": now, "until": end}, f)
+    log("off", until=end)
+    print(f"claude-maxer is OFF until {datetime.fromtimestamp(end):%Y-%m-%d %H:%M}" if end
+          else "claude-maxer is OFF until `maxer.py on`")
+    return 0
+
+
+def cmd_on():
+    if os.path.exists(PAUSE_PATH):
+        os.remove(PAUSE_PATH)
+        log("on")
+        print("claude-maxer is ON")
+    else:
+        print("claude-maxer was already on")
+    return 0
+
+
 def gate(u, now):
     """(ok, reason) for starting more work right now."""
+    off = paused(now)
+    if off:
+        return False, off
     if u["age"] > SNAPSHOT_MAX_AGE_S:
         return False, f"usage snapshot is {int(u['age'] / 60)} min old"
     if not window_open(u, now):
@@ -658,8 +727,14 @@ def ping():
 
 
 def cmd_open(dry_run):
-    u = fresh_usage()
     now = time.time()
+    off = paused(now)
+    if off:
+        log("open_skip", reason=off)
+        if not dry_run:
+            vault_decision(now, read_usage(), f"- {hm(now)} open · skipped: {off}")
+        return 0
+    u = fresh_usage()
     if window_open(u, now):
         wait = u["five_reset"] - now
         if wait > OPEN_WAIT_MAX_S:
@@ -694,6 +769,7 @@ def cmd_status():
     now = time.time()
     ok, why = gate(u, now)
     b = day_budget(u, now, persist=False)
+    print(f"switch: {paused(now) or 'on'}")
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
           f"  | 7d {u['seven_pct']}%  today's budget {b['budget']}pp "
           f"(from {b['seven_start']}% → ceiling {b['ceiling']}%, {b['days_left']} days left)")
@@ -708,9 +784,14 @@ def cmd_status():
 
 def main():
     ap = argparse.ArgumentParser(description="claude-maxer")
-    ap.add_argument("command", choices=["run", "open", "status"])
+    ap.add_argument("command", choices=["run", "open", "status", "off", "on"])
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--until", help="with off: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
     a = ap.parse_args()
+    if a.command == "off":
+        return cmd_off(a.until)
+    if a.command == "on":
+        return cmd_on()
     if a.command in ("run", "open", "status"):
         try:
             use_skill()

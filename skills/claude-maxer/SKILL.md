@@ -6,6 +6,7 @@ description: >
   Check if the background script exists, make one if it doesn't. Execute tasks follow the strategies.
   Work comes from the task queue (tasks-queue skill) when one is available; the tasks listed here
   are the defaults, run only when no task queue is available.
+  Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer.
 ---
 
 # Claude-maxer
@@ -138,7 +139,20 @@ this file can't be parsed, `run` logs `skill_error` there and does nothing.
 ./run_maxer_work.sh status          # usage, today's budget, parsed tasks/settings, run decision
 ./run_maxer_work.sh run --dry-run   # gate decision + the first task's full prompt
 ./run_maxer_work.sh open --dry-run  # what the opener would do
+./run_maxer_work.sh off             # switch off until `on`
+./run_maxer_work.sh off --until 3d  # or 2h, 30m, 18:00, 2026-10-01, "2026-10-01 08:00"
+./run_maxer_work.sh on              # switch back on
 ```
+
+**The switch.** `off` writes `~/.claude/state/claude-maxer-off.json`; while
+it exists, every scheduled `open` and `run` does nothing and logs
+`skipped: switched off …` (so the vault log still shows the machine is alive),
+and a run already in progress stops starting new tasks. `--until` expires it
+by itself. The crontab stays untouched. When the user asks to pause, disable,
+stop, resume or re-enable claude-maxer, run these commands. The cloud backup
+ping (`claude-maxer-daily-ping` routine) can't see this file; it only opens a
+window and spends almost nothing, but pause it via the schedule skill if the
+user wants zero activity.
 
 Any setting can be overridden for a manual test with env `MAXER_<KEY>`,
 e.g. `MAXER_CONCURRENCY=1`.
