@@ -15,7 +15,7 @@ Trigger claims
 - **T5**: fires on questions about the routine it manages (keep-alive ping, unattended hourly work loop, its digests/PRs) even when not named.
 
 Non-trigger claims
-- **N1**: the vault Tasks queue belongs to `vault-tasks`.
+- **N1**: the vault Tasks queue belongs to `tasks-queue` (formerly `vault-tasks`).
 - **N2**: provider routing / the proxy belongs to `model-switch`.
 - **N3**: other neighbouring skills (skill-bench, context-summarize, nextcloud-paper) and generic cron jobs unrelated to usage.
 - **N4**: Anthropic *API* rate limits (tier limits) are not the subscription window.

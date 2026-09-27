@@ -1,4 +1,0 @@
-name: vault-tasks
-description: Queue interface to the Obsidian vault's Tasks note — pick/list/mark undone items for unattended work in /data/apps/myfollows. Owns no schedule; claude-maxer drives it.
-scope: project
-tags: [automation, obsidian, myfollows, queue]

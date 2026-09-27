@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Read/write the undone-task queue in the Obsidian vault's Tasks note.
 
-This is a library + CLI only -- it owns no schedule. claude-maxer drives it
-(`pick` -> do the work -> `mark`); see SKILL.md.
+This is a library + CLI only -- it owns no schedule. Callers run
+`pick` -> do the work -> `mark`; see SKILL.md.
 
 Vault binding: the note is `Tasks.md` at the vault root, reached through the
 headless obsidian-vault MCP container (obsidian-local/scripts/vault_mcp.py), so
-the Obsidian app need not run. Override with VAULT_TASKS_PATH if it ever moves.
+the Obsidian app need not run. Override with TASKS_QUEUE_PATH if it ever moves.
 
 What counts as a task
 ---------------------
@@ -18,8 +18,8 @@ A bare prose line directly under a list item is a *continuation* of that
 item, not a task of its own -- long entries get soft-wrapped onto a second
 physical line when typed in Obsidian. Treating one as a task is actively
 harmful: it hands half a sentence to the worker as the whole job (an entry
-about the claude-maxer skill got picked up as work scoped to a different
-repo), and marking it splits the user's single item into two.
+about one repo got picked up as work scoped to a different repo), and
+marking it splits the user's single item into two.
 
 Calls the container over HTTP itself rather than through Claude's MCP tools,
 so it works from an unattended context with no MCP session.
@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "obsidian-local", "scripts"))
 from vault_mcp import read_note, write_note  # noqa: E402
 
-TASKS_PATH = os.environ.get("VAULT_TASKS_PATH", "Tasks.md")
+TASKS_PATH = os.environ.get("TASKS_QUEUE_PATH", "Tasks.md")
 _frontmatter = {}  # kept from the last read so a rewrite doesn't drop it
 
 
@@ -144,7 +144,7 @@ def cmd_mark(target):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: vault_tasks.py pick|list|mark <text>", file=sys.stderr)
+        print("usage: tasks_queue.py pick|list|mark <text>", file=sys.stderr)
         sys.exit(2)
     if sys.argv[1] == "pick":
         sys.exit(cmd_pick())

@@ -101,7 +101,7 @@ container (27125), not at the plugin.
 For scripts/cron with no MCP session, use the Python client
 `scripts/vault_mcp.py` (`call`, `read_note`, `write_note`, `exists`); it
 talks to the container, bypasses the proxy and starts the container if it's
-down. `vault-tasks` and `claude-maxer` use it.
+down. `tasks-queue` and `claude-maxer` use it.
 
 ## Workflows
 

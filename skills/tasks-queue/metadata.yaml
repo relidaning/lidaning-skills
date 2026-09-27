@@ -1,0 +1,4 @@
+name: tasks-queue
+description: The user's priority task queue — the vault's Tasks.md ranks above all other work. List/pick/mark undone items. Owns no schedule.
+scope: project
+tags: [tasks, obsidian, queue, priority]

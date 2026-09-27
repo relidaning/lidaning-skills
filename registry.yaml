@@ -21,7 +21,7 @@ skills:
     path: skills/context-summarize
   - name: skillopt
     path: skills/skillopt
-  - name: vault-tasks
-    path: skills/vault-tasks
+  - name: tasks-queue
+    path: skills/tasks-queue
   - name: skill-bench
     path: skills/skill-bench
