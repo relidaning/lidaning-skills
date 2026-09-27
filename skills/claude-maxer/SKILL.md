@@ -6,7 +6,8 @@ description: >
   Check if the background script exists, make one if it doesn't. Execute tasks follow the strategies.
   Work comes from the task queue (tasks-queue skill) when one is available; the tasks listed here
   are the defaults, run only when no task queue is available.
-  Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer.
+  Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer,
+  or to ignore / respect the weekly (7d) limit.
 ---
 
 # Claude-maxer
@@ -67,7 +68,10 @@ queue is available, run the default tasks listed under [Tasks](#tasks).**
 Any task queue outranks the defaults here.
 
 Today the queue is the `tasks-queue` skill (`../tasks-queue/tasks_queue.py`).
-Before each batch, `run` asks it for work, in this order:
+**The queue decides the order** (`tasks_queue.py next`); `run` decides only
+whether there is quota and whether the task fits in what's left of the
+window (if a repo task is too big, it asks again with `--small` and gets
+news). The order, as the queue hands it out:
 
 1. **An undone item in the vault's `Tasks.md`.** It runs alone, as a
    `claude -p` session with full tools and no permission prompts
@@ -78,9 +82,21 @@ Before each batch, `run` asks it for work, in this order:
    really landed on master in the repo the session named. A failed or
    skipped task is retried on the next run and dropped after 2 attempts
    (counts in `~/.claude/state/claude-maxer-vault-fails.json`; delete an
-   entry to retry it).
-2. **The queue's news tasks**, when no vault task is waiting.
-3. **The defaults below**, only when the queue can't be read (script missing,
+   entry to retry it; `run` passes those as `--skip`).
+2. **One news batch, if today hasn't had one yet** (`concurrency` news
+   tasks in parallel; `run` reports it with `tasks_queue.py news-ran`).
+3. **An optimize task**: one app under `/data/apps`, delivered as a PR. It
+   runs alone, in the app's directory, but edits only a fresh git worktree
+   on a new `opt/<app>-<stamp>` branch, so your checkout is never touched.
+   It pushes and opens a PR only for your own `relidaning/*` repos (a local
+   branch otherwise). It never restarts or redeploys anything. `run` files
+   the report in `claude-maxer/optimize/<app>.md`, removes the worktree, and
+   counts "optimized" only if `gh` can see the PR (or the local branch got
+   a new commit); anything else is logged as findings. Details and the
+   worker prompt: tasks-queue's `## Optimize tasks`.
+4. **More news tasks**, as filler, when no app is left to optimize or the
+   room left in the window is too small for one.
+5. **The defaults below**, only when the queue can't be read (script missing,
    vault container down) or lists no news tasks.
 
 ## Tasks
@@ -121,6 +137,9 @@ Find the 10 most important stories from the last 48 hours on China's technology 
 - `claude-maxer/news/YYYY-MM-DD.md`: all of the day's output in one note,
   one `## HH:MM · Task` section per task.
 - Vault tasks land as commits in their own repo, not in the news note.
+- `claude-maxer/optimize/<app>.md`: one dated report per optimize visit
+  (what it is, findings, what was chosen and why, before → after, what's
+  left for you). The fix itself is a PR in the app's repo.
 - `claude-maxer/log/YYYY-MM-DD.md`: today's budget, then one line for
   **every scheduled decision** (each `open` and `run`, including skips and
   why), and a block for each run that starts tasks: usage at start, a link
@@ -142,6 +161,8 @@ this file can't be parsed, `run` logs `skill_error` there and does nothing.
 ./run_maxer_work.sh off             # switch off until `on`
 ./run_maxer_work.sh off --until 3d  # or 2h, 30m, 18:00, 2026-10-01, "2026-10-01 08:00"
 ./run_maxer_work.sh on              # switch back on
+./run_maxer_work.sh weekly off      # ignore the weekly (7d) limit; also takes --until
+./run_maxer_work.sh weekly on       # respect it again (today's budget ceiling applies)
 ```
 
 **The switch.** `off` writes `~/.claude/state/claude-maxer-off.json`; while
@@ -153,6 +174,17 @@ stop, resume or re-enable claude-maxer, run these commands. The cloud backup
 ping (`claude-maxer-daily-ping` routine) can't see this file; it only opens a
 window and spends almost nothing, but pause it via the schedule skill if the
 user wants zero activity.
+
+**The weekly switch.** `weekly off` writes
+`~/.claude/state/claude-maxer-weekly-off.json`; while it exists, `run`
+ignores today's weekly-budget ceiling and fills every open window to
+`target_5h`. The 5h target, the window timing and the main off switch still
+apply. About 7pp of the week goes per full window, so four windows a day can
+use up the week in a few days. Once 7d reaches 100% Anthropic locks you out
+(interactive use too) until the weekly reset. `--until` works as for `off`.
+`status` shows the switch, and each run's log line notes when the ceiling was
+ignored. When the user asks to ignore, disable, drop, respect or re-enable
+the weekly limit, run these commands.
 
 Any setting can be overridden for a manual test with env `MAXER_<KEY>`,
 e.g. `MAXER_CONCURRENCY=1`.
