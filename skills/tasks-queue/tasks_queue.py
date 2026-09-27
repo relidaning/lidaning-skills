@@ -24,6 +24,7 @@ marking it splits the user's single item into two.
 Calls the container over HTTP itself rather than through Claude's MCP tools,
 so it works from an unattended context with no MCP session.
 """
+import json
 import os
 import re
 import sys
@@ -132,6 +133,31 @@ def cmd_list():
     return 0 if found else 1
 
 
+SKILL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKILL.md")
+
+
+def news_tasks(path=SKILL_PATH):
+    """The lower-priority tier: `### Title` + prompt entries under SKILL.md's
+    `## News tasks` section. Read from the skill file, not the vault, so it
+    works even when the vault container is down."""
+    with open(path) as f:
+        text = f.read()
+    m = re.search(r"^## News tasks[^\n]*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    tasks = []
+    if m:
+        for block in re.split(r"^### ", m.group(1), flags=re.M)[1:]:
+            title, _, body = block.partition("\n")
+            if title.strip() and body.strip():
+                tasks.append({"title": title.strip(), "prompt": body.strip()})
+    return tasks
+
+
+def cmd_news():
+    tasks = news_tasks()
+    print(json.dumps(tasks, ensure_ascii=False, indent=1))
+    return 0 if tasks else 1
+
+
 def cmd_mark(target):
     lines = get_content().splitlines()
     for i, line in undone_tasks("\n".join(lines)):
@@ -144,12 +170,14 @@ def cmd_mark(target):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: tasks_queue.py pick|list|mark <text>", file=sys.stderr)
+        print("usage: tasks_queue.py pick|list|mark <text>|news", file=sys.stderr)
         sys.exit(2)
     if sys.argv[1] == "pick":
         sys.exit(cmd_pick())
     elif sys.argv[1] == "list":
         sys.exit(cmd_list())
+    elif sys.argv[1] == "news":
+        sys.exit(cmd_news())
     elif sys.argv[1] == "mark" and len(sys.argv) >= 3:
         sys.exit(cmd_mark(sys.argv[2]))
     else:

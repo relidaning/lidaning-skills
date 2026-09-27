@@ -4,6 +4,8 @@ description: >
   Trigger this skill when the request contains 'In order to untilize my claude limitation ...',   'to max my claude limitation ...', 
   'as my limitation of claude subscription has xx left ...', '5h', '7d', etc. Users want to leverate their Claude subscriptions. 
   Check if the background script exists, make one if it doesn't. Execute tasks follow the strategies.
+  Work comes from the task queue (tasks-queue skill) when one is available; the tasks listed here
+  are the defaults, run only when no task queue is available.
 ---
 
 # Claude-maxer
@@ -57,9 +59,33 @@ the week, so a share of ~9pp is roughly 1⅓ full windows a day. Your own
 interactive use comes out of the same budget. Raise `weekly_target` to spend
 more, but at 100 you may be locked out until the weekly reset.
 
+## Where the work comes from
+
+**When a task queue is available, run the tasks it provides. When no task
+queue is available, run the default tasks listed under [Tasks](#tasks).**
+Any task queue outranks the defaults here.
+
+Today the queue is the `tasks-queue` skill (`../tasks-queue/tasks_queue.py`).
+Before each batch, `run` asks it for work, in this order:
+
+1. **An undone item in the vault's `Tasks.md`.** It runs alone, as a
+   `claude -p` session with full tools and no permission prompts
+   (`--dangerously-skip-permissions`) in `/data/apps`. The session works out
+   which repo the task means, implements it, and commits to master. It never
+   pushes, and it stops if the repo is on another branch or has someone
+   else's uncommitted work. The task is checked off only if a new commit
+   really landed on master in the repo the session named. A failed or
+   skipped task is retried on the next run and dropped after 2 attempts
+   (counts in `~/.claude/state/claude-maxer-vault-fails.json`; delete an
+   entry to retry it).
+2. **The queue's news tasks**, when no vault task is waiting.
+3. **The defaults below**, only when the queue can't be read (script missing,
+   vault container down) or lists no news tasks.
+
 ## Tasks
 
-Each `### Title` below is one task. Its body is the prompt sent to a
+The default tasks, used only when no task queue is available. Each
+`### Title` below is one task. Its body is the prompt sent to a
 headless `claude -p` that has only WebSearch and WebFetch. Tasks rotate in
 this order across runs. The engine appends the output rules (a numbered list
 of linked items, no invented URLs, skip items already in today's note), so a
@@ -93,6 +119,7 @@ Find the 10 most important stories from the last 48 hours on China's technology 
 
 - `claude-maxer/news/YYYY-MM-DD.md`: all of the day's output in one note,
   one `## HH:MM · Task` section per task.
+- Vault tasks land as commits in their own repo, not in the news note.
 - `claude-maxer/log/YYYY-MM-DD.md`: today's budget, then one line for
   **every scheduled decision** (each `open` and `run`, including skips and
   why), and a block for each run that starts tasks: usage at start, a link

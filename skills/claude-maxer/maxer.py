@@ -11,8 +11,12 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
   open    Start a 5h window with a one-word Haiku ping. If a window is still
           open and resets within 20 min, wait for the reset and ping right
           after it. If it resets later than that, do nothing.
-  run     Fill the window that is open right now. Start tasks from SKILL.md in
-          batches until 5h reaches the target, 7d reaches today's budget ceiling, or
+  run     Fill the window that is open right now. Work comes from the
+          tasks-queue skill when it can be read: an undone vault Tasks.md
+          item first (one at a time, committed to master in its repo), then
+          the queue's news tasks. SKILL.md's own tasks are the default, used
+          only when the queue can't be read. Start tasks in batches until 5h
+          reaches the target, 7d reaches today's budget ceiling, or
           the reset is less than 10 min away. Never runs when no window is
           open, because the first request would open one at the wrong time.
           Running tasks are killed 2 min before the reset for the same
@@ -73,6 +77,16 @@ DEFAULTS = {
 }
 CFG = dict(DEFAULTS)
 TASKS = []  # [(slug, title, prompt)], loaded from SKILL.md
+
+# The task queue (tasks-queue skill) outranks SKILL.md's own tasks: tier 1 is
+# the vault's Tasks.md, tier 2 its news tasks. SKILL.md's tasks are the
+# default, used only when the queue can't be read.
+QUEUE_SCRIPT = os.path.join(SKILL_DIR, "..", "tasks-queue", "tasks_queue.py")
+QUEUE_TIMEOUT_S = 90         # the vault container has hung before; never wait on it long
+VAULT_TASK_ROOT = "/data/apps"  # repos a vault task may target
+VAULT_FAILS_PATH = os.path.join(STATE_DIR, "claude-maxer-vault-fails.json")
+MAX_VAULT_ATTEMPTS = 2       # then skip that task until the user edits it
+DEFAULT_VAULT_PCT = 10.0     # first guess at 5h% per vault task; replaced by measurement
 
 VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
 
@@ -223,20 +237,145 @@ def gate(u, now):
     return True, "ok"
 
 
-def next_tasks(n):
-    """Round-robin through SKILL.md's tasks across runs, by title, so
+def next_tasks(n, tasks):
+    """Round-robin through the news tasks across runs, by title, so
     editing the list doesn't reset or skip the rotation badly."""
     try:
         with open(ROTATION_PATH) as f:
             last = json.load(f).get("last")
     except (OSError, ValueError):
         last = None
-    titles = [t[1] for t in TASKS]
+    titles = [t[1] for t in tasks]
     idx = titles.index(last) + 1 if last in titles else 0
-    picked = [TASKS[(idx + i) % len(TASKS)] for i in range(min(n, len(TASKS)))]
+    picked = [tasks[(idx + i) % len(tasks)] for i in range(min(n, len(tasks)))]
     with open(ROTATION_PATH, "w") as f:
         json.dump({"last": picked[-1][1]}, f)
     return picked
+
+
+# ── task queue ─────────────────────────────────────────────────────────────
+
+def queue_call(*args):
+    """(returncode, stdout) from tasks_queue.py, or None if it can't run."""
+    try:
+        p = subprocess.run([sys.executable, QUEUE_SCRIPT, *args], capture_output=True,
+                           text=True, timeout=QUEUE_TIMEOUT_S)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def news_source():
+    """(tasks, source): the queue's news tasks, or SKILL.md's defaults when
+    the queue can't be read or lists none."""
+    r = queue_call("news")
+    if r and r[0] == 0:
+        try:
+            tasks = [(slugify(t["title"]), t["title"], t["prompt"]) for t in json.loads(r[1])]
+            if tasks:
+                return tasks, "tasks-queue"
+        except (ValueError, KeyError, TypeError):
+            pass
+    return TASKS, "claude-maxer defaults"
+
+
+def read_fails():
+    try:
+        with open(VAULT_FAILS_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def next_vault_task(skip=()):
+    """First undone vault task not yet failed MAX_VAULT_ATTEMPTS times and not
+    in `skip`, or None (no task, or the vault can't be read)."""
+    r = queue_call("list")
+    if not r or r[0] != 0:
+        return None
+    fails = read_fails()
+    for line in r[1].splitlines():
+        _, _, text = line.partition("\t")
+        if text and text not in skip and fails.get(text, 0) < MAX_VAULT_ATTEMPTS:
+            return text
+    return None
+
+
+VAULT_PROMPT = """You are running unattended for claude-maxer. A task from the user's Obsidian \
+vault Tasks.md reads:
+
+"{task}"
+
+Repos live under {root}. Work out which repo the task is about, cd into it, and implement \
+the task: make the needed changes and run any existing lint/typecheck/build/test step for \
+the touched area. Keep the change scoped to this task; no unrelated cleanup.
+
+Before committing, check `git branch --show-current` and `git status`. Commit to master. \
+If the repo is on another branch or has uncommitted work you didn't make, stop without \
+committing. Do not push, and do not open a PR.
+
+If the task is unclear, needs a decision from the user, or you can't tell which repo it \
+means, change nothing and stop.
+
+End your reply with exactly these two lines:
+REPO: <absolute path of the repo, or none>
+RESULT: done | skipped <one-line reason>"""
+
+
+def last_commit_ts(repo):
+    try:
+        br = subprocess.run(["git", "-C", repo, "branch", "--show-current"],
+                            capture_output=True, text=True, timeout=30).stdout.strip()
+        ts = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%ct"],
+                            capture_output=True, text=True, timeout=30).stdout.strip()
+        return br, float(ts or 0)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None, 0.0
+
+
+def run_vault_task(text, deadline):
+    """Run one vault task with full tools. Mark it done only if a new commit
+    landed on master in the repo it names; otherwise count a failed attempt."""
+    started = time.time()
+    res = {"slug": "vault-task", "title": f"vault task: {text[:60]}", "start": started,
+           "items": 0, "cost": 0.0}
+    cmd = ["claude", "-p", VAULT_PROMPT.format(task=text, root=VAULT_TASK_ROOT),
+           "--model", CFG["model"], "--output-format", "json",
+           "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
+    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    try:
+        p = subprocess.run(cmd, cwd=VAULT_TASK_ROOT, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=timeout)
+        out = json.loads(p.stdout)
+        res["cost"] = float(out.get("total_cost_usd") or 0)
+        reply = out.get("result") or ""
+    except subprocess.TimeoutExpired:
+        reply, res["error"] = "", "killed before the window reset"
+    except ValueError:
+        reply, res["error"] = "", "unparseable output"
+    res["end"] = time.time()
+
+    repo = (re.findall(r"^REPO:\s*(\S+)", reply, re.M) or ["none"])[-1]
+    result = (re.findall(r"^RESULT:\s*(.+)$", reply, re.M) or [""])[-1].strip()
+    if not res.get("error"):
+        repo_ok = (repo.startswith(VAULT_TASK_ROOT + "/")
+                   and os.path.isdir(os.path.join(repo, ".git")))
+        br, ts = last_commit_ts(repo) if repo_ok else (None, 0.0)
+        if result.startswith("done") and br == "master" and ts >= int(started):
+            r = queue_call("mark", text)
+            res["repo"] = repo
+            if not r or r[0] != 0:
+                res["error"] = f"committed in {repo} but marking the vault task failed"
+        else:
+            res["error"] = (result or "no RESULT line")[:120] + (
+                "" if result.startswith("skipped") else f" (repo {repo}, no new master commit)")
+    if res.get("error"):
+        fails = read_fails()
+        fails[text] = fails.get(text, 0) + 1
+        with open(VAULT_FAILS_PATH, "w") as f:
+            json.dump(fails, f, ensure_ascii=False)
+        res["attempt"] = fails[text]
+    return res
 
 
 # ── vault ──────────────────────────────────────────────────────────────────
@@ -397,8 +536,12 @@ def cmd_run(dry_run):
     if dry_run:
         print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
               f"7d {u['seven_pct']}% (today's ceiling {day_budget(u, time.time(), False)['ceiling']}%)")
-        print("tasks:", [t[1] for t in TASKS])
-        print(build_prompt(TASKS[0][2], [])[:900])
+        vt = next_vault_task()
+        news, src = news_source()
+        print("next vault task:", vt or "none")
+        print(f"news tasks ({src}):", [t[1] for t in news])
+        print(VAULT_PROMPT.format(task=vt, root=VAULT_TASK_ROOT) if vt
+              else build_prompt(news[0][2], [])[:900])
         return 0
 
     day = datetime.now().strftime("%Y-%m-%d")
@@ -414,8 +557,11 @@ def cmd_run(dry_run):
     )
     log("run_start", five=u["five_pct"], seven=u["seven_pct"], resets=reset)
 
-    per_task = DEFAULT_TASK_PCT
+    per_task, per_vault = DEFAULT_TASK_PCT, DEFAULT_VAULT_PCT
     total_cost, tasks_done = 0.0, 0
+    tried = set()
+    news, src = news_source()
+    vault_append(note, f"- news tasks from {src}\n")
     while True:
         ok, why = gate(u, time.time())
         if not ok:
@@ -423,29 +569,45 @@ def cmd_run(dry_run):
         # Never start a task expected to push 5h past target + overshoot:
         # 100% locks the user out until the reset.
         room = CFG["target_5h"] + CFG["overshoot"] - (u["five_pct"] or 0)
-        n = min(CFG["concurrency"], int(room // max(per_task, 0.5)))
-        if n < 1:
-            why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
-            break
-        batch = next_tasks(n)
         before = u["five_pct"] or 0
-        with ThreadPoolExecutor(max_workers=len(batch)) as ex:
-            results = list(ex.map(lambda t: run_task(*t, day, deadline), batch))
-        u = fresh_usage()
-        delta = (u["five_pct"] or 0) - before
-        if delta > 0:
-            per_task = delta / len(batch)
+        # Tier 1: a vault task, alone (it edits a repo), whenever one fits.
+        vt = next_vault_task(tried) if room >= per_vault else None
+        if vt:
+            tried.add(vt)  # one attempt per run; a failure retries next run
+            results = [run_vault_task(vt, deadline)]
+            u = fresh_usage()
+            delta = (u["five_pct"] or 0) - before
+            if delta > 0:
+                per_vault = delta
+        else:
+            n = min(CFG["concurrency"], int(room // max(per_task, 0.5)))
+            if n < 1:
+                why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
+                break
+            batch = next_tasks(n, news)
+            with ThreadPoolExecutor(max_workers=len(batch)) as ex:
+                results = list(ex.map(lambda t: run_task(*t, day, deadline), batch))
+            u = fresh_usage()
+            delta = (u["five_pct"] or 0) - before
+            if delta > 0:
+                per_task = delta / len(batch)
         for r in results:
             total_cost += r["cost"]
             if r.get("error"):
-                line = f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed: {r['error']} · ${r['cost']:.2f}\n"
+                tries = f" (attempt {r['attempt']}/{MAX_VAULT_ATTEMPTS})" if "attempt" in r else ""
+                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed{tries}: "
+                        f"{r['error']} · ${r['cost']:.2f}\n")
+            elif r["slug"] == "vault-task":
+                tasks_done += 1
+                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · done, committed "
+                        f"in {r['repo']}, checked off in Tasks.md · ${r['cost']:.2f}\n")
             else:
                 tasks_done += 1
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
                         f"· ${r['cost']:.2f}\n")
             vault_append(note, line)
             log("task", **r)
-        vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(batch)}: +{delta:.0f}pp)\n")
+        vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(results)}: +{delta:.0f}pp)\n")
 
     vault_append(note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
                            f"5h {start_five}% → {u['five_pct']}%\n")
@@ -506,7 +668,10 @@ def cmd_status():
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
           f"  | 7d {u['seven_pct']}%  today's budget {b['budget']}pp "
           f"(from {b['seven_start']}% → ceiling {b['ceiling']}%, {b['days_left']} days left)")
-    print(f"tasks from SKILL.md: {', '.join(t[1] for t in TASKS)}")
+    vt = next_vault_task()
+    news, src = news_source()
+    print(f"next vault task: {vt or 'none'}")
+    print(f"news tasks from {src}: {', '.join(t[1] for t in news)}")
     print(f"settings: {CFG}")
     print("run would start tasks now" if ok else f"run would skip: {why}")
     return 0
