@@ -348,6 +348,7 @@ def run_vault_task(text, deadline):
                            capture_output=True, text=True, timeout=timeout)
         out = json.loads(p.stdout)
         res["cost"] = float(out.get("total_cost_usd") or 0)
+        res["tokens"] = token_usage(out)
         reply = out.get("result") or ""
     except subprocess.TimeoutExpired:
         reply, res["error"] = "", "killed before the window reset"
@@ -469,6 +470,29 @@ def build_prompt(task_prompt, already):
     return task_prompt + CONTRACT + skip
 
 
+TOKEN_KEYS = ("inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens", "outputTokens")
+
+
+def token_usage(out):
+    """Tokens summed over every model the session used (modelUsage also
+    covers subagent/helper models, which the top-level usage omits)."""
+    tot = dict.fromkeys(TOKEN_KEYS, 0)
+    for m in (out.get("modelUsage") or {}).values():
+        for k in TOKEN_KEYS:
+            tot[k] += int(m.get(k) or 0)
+    return tot
+
+
+def fmt_tokens(t):
+    def n(x):
+        return f"{x / 1e6:.1f}M" if x >= 1e6 else f"{x / 1e3:.0f}k" if x >= 1e4 \
+            else f"{x / 1e3:.1f}k" if x >= 1e3 else str(x)
+    if not t or not any(t.values()):
+        return "tokens n/a"
+    return (f"{n(t['inputTokens'])} in, {n(t['cacheCreationInputTokens'])} cache write, "
+            f"{n(t['cacheReadInputTokens'])} cache read, {n(t['outputTokens'])} out")
+
+
 def run_task(slug, title, prompt, day, deadline):
     path = note_path(day)
     cmd = [
@@ -499,6 +523,7 @@ def run_task(slug, title, prompt, day, deadline):
         res["error"] = f"exit {p.returncode}, unparseable output"
         return res
     res["cost"] = float(out.get("total_cost_usd") or 0)
+    res["tokens"] = token_usage(out)
     text = PRACTICE_BLOCK.sub("", out.get("result") or "").strip()
     entries = ENTRY.findall(text)
     if out.get("is_error") or not entries:
@@ -559,6 +584,7 @@ def cmd_run(dry_run):
 
     per_task, per_vault = DEFAULT_TASK_PCT, DEFAULT_VAULT_PCT
     total_cost, tasks_done = 0.0, 0
+    total_tokens = dict.fromkeys(TOKEN_KEYS, 0)
     tried = set()
     news, src = news_source()
     vault_append(note, f"- news tasks from {src}\n")
@@ -593,25 +619,28 @@ def cmd_run(dry_run):
                 per_task = delta / len(batch)
         for r in results:
             total_cost += r["cost"]
+            for k, v in r.get("tokens", {}).items():
+                total_tokens[k] += v
+            cost = f"${r['cost']:.2f} · {fmt_tokens(r.get('tokens'))}"
             if r.get("error"):
                 tries = f" (attempt {r['attempt']}/{MAX_VAULT_ATTEMPTS})" if "attempt" in r else ""
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed{tries}: "
-                        f"{r['error']} · ${r['cost']:.2f}\n")
+                        f"{r['error']} · {cost}\n")
             elif r["slug"] == "vault-task":
                 tasks_done += 1
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · done, committed "
-                        f"in {r['repo']}, checked off in Tasks.md · ${r['cost']:.2f}\n")
+                        f"in {r['repo']}, checked off in Tasks.md · {cost}\n")
             else:
                 tasks_done += 1
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
-                        f"· ${r['cost']:.2f}\n")
+                        f"· {cost}\n")
             vault_append(note, line)
             log("task", **r)
         vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(results)}: +{delta:.0f}pp)\n")
 
     vault_append(note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
-                           f"5h {start_five}% → {u['five_pct']}%\n")
-    log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2),
+                           f"{fmt_tokens(total_tokens)}, 5h {start_five}% → {u['five_pct']}%\n")
+    log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2), tokens=total_tokens,
         five_start=start_five, five_end=u["five_pct"])
     return 0
 
