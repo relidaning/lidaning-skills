@@ -12,7 +12,7 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           open and resets within 20 min, wait for the reset and ping right
           after it. If it resets later than that, do nothing.
   run     Fill the window that is open right now. Start tasks from SKILL.md in
-          batches until 5h reaches the target, 7d crosses its pace line, or
+          batches until 5h reaches the target, 7d reaches today's budget ceiling, or
           the reset is less than 10 min away. Never runs when no window is
           open, because the first request would open one at the wrong time.
           Running tasks are killed 2 min before the reset for the same
@@ -45,6 +45,7 @@ STATE_DIR = os.path.expanduser("~/.claude/state")
 SNAPSHOT_PATH = os.path.join(STATE_DIR, "usage_snapshot.json")
 LOG_PATH = os.path.join(STATE_DIR, "claude-maxer.log.jsonl")
 ROTATION_PATH = os.path.join(STATE_DIR, "claude-maxer-rotation.json")
+BUDGET_PATH = os.path.join(STATE_DIR, "claude-maxer-day.json")
 WORK_DIR = os.path.join(STATE_DIR, "claude-maxer-work")  # neutral cwd: no repo CLAUDE.md
 RUN_LOCK = "/tmp/claude-maxer-run.lock"
 # Shared with the */15 fetch cron: fetch_usage_oauth.py rotates a single-use
@@ -65,7 +66,6 @@ DEFAULTS = {
     "target_5h": 95.0,
     "overshoot": 3.0,
     "weekly_target": 95.0,
-    "weekly_slack": 5.0,
     "concurrency": 3,
     "model": "claude-opus-5-5",
     "budget_usd": "5",
@@ -179,15 +179,31 @@ def window_open(u, now):
     return bool(u["five_reset"]) and u["five_reset"] > now
 
 
-def weekly_line(u, now):
-    """Highest 7d% allowed right now: the even pace that lands on
-    weekly_target at the weekly reset, plus weekly_slack."""
-    tgt = CFG["weekly_target"]
-    if not u["seven_reset"]:
-        return tgt
-    week = 7 * 86400
-    elapsed = min(max(now - (u["seven_reset"] - week), 0), week) / week
-    return min(tgt, tgt * elapsed + CFG["weekly_slack"])
+def day_budget(u, now, persist=True):
+    """Today's 7d ceiling. Once per day (and again if a new week starts), what
+    is left of the week up to weekly_target is split evenly over the days
+    left until the weekly reset; today may spend one share. Earlier heavy use
+    shrinks the share but never blocks a day outright. Returns a dict:
+    seven_start, budget (pp), ceiling (%), new (first computed now)."""
+    today = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    try:
+        with open(BUDGET_PATH) as f:
+            b = json.load(f)
+        if b.get("date") == today and b.get("seven_reset") == u["seven_reset"]:
+            return dict(b, new=False)
+    except (OSError, ValueError):
+        pass
+    tgt, seven = CFG["weekly_target"], u["seven_pct"] or 0
+    midnight = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0).timestamp()
+    days_left = ((u["seven_reset"] or now + 86400) - midnight) / 86400
+    budget = max(0.0, tgt - seven) / max(days_left, 1.0)
+    b = {"date": today, "seven_reset": u["seven_reset"], "seven_start": seven,
+         "days_left": round(days_left, 2), "budget": round(budget, 1),
+         "ceiling": round(min(tgt, seven + budget), 1)}
+    if persist:
+        with open(BUDGET_PATH, "w") as f:
+            json.dump(b, f)
+    return dict(b, new=True)
 
 
 def gate(u, now):
@@ -201,9 +217,9 @@ def gate(u, now):
         return False, f"window resets {hm(u['five_reset'])}, only {left_min:.0f} min left"
     if u["five_pct"] is not None and u["five_pct"] >= CFG["target_5h"]:
         return False, f"5h at {u['five_pct']}%, target {CFG['target_5h']:.0f}% reached"
-    line = weekly_line(u, now)
-    if u["seven_pct"] is not None and u["seven_pct"] >= line:
-        return False, f"7d at {u['seven_pct']}%, over its pace line {line:.0f}%"
+    ceiling = day_budget(u, now)["ceiling"]
+    if u["seven_pct"] is not None and u["seven_pct"] >= ceiling:
+        return False, f"7d at {u['seven_pct']}%, today's weekly-budget ceiling is {ceiling}%"
     return True, "ok"
 
 
@@ -252,6 +268,25 @@ def vault_append(path, text, heading=None):
         if heading and f.tell() == 0:
             text = heading + text
         f.write(text)
+
+
+def log_note(day):
+    return f"claude-maxer/log/{day}.md"
+
+
+def vault_decision(now, u, line):
+    """One line per scheduled decision in the vault log. On the day's first
+    entry, the note heading and today's weekly budget go first."""
+    day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    b = day_budget(u, now)
+    head = ""
+    if b["new"] or not os.path.exists(os.path.join(VAULT_ROOT, log_note(day))):
+        head = (f"\n**Today's budget:** {b['budget']}pp of the weekly limit "
+                f"(7d {b['seven_start']}% → ceiling {b['ceiling']}%, "
+                f"{b['days_left']} days to the weekly reset)\n\n")
+    vault_append(log_note(day), head + line + "\n",
+                 heading=f"# claude-maxer log — {day}\n\nEvery scheduled open/run decision, "
+                         f"and every task. News lands in claude-maxer/news/.\n")
 
 
 # ── one task ───────────────────────────────────────────────────────────────
@@ -355,26 +390,27 @@ def cmd_run(dry_run):
     ok, why = gate(u, time.time())
     if not ok:
         log("skip", reason=why, five=u["five_pct"], seven=u["seven_pct"])
+        if not dry_run:
+            vault_decision(time.time(), u, f"- {hm(time.time())} run · skipped: {why} "
+                                           f"(5h {u['five_pct']}%)")
         return 0
     if dry_run:
         print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
-              f"7d {u['seven_pct']}% (line {weekly_line(u, time.time()):.0f}%)")
+              f"7d {u['seven_pct']}% (today's ceiling {day_budget(u, time.time(), False)['ceiling']}%)")
         print("tasks:", [t[1] for t in TASKS])
         print(build_prompt(TASKS[0][2], [])[:900])
         return 0
 
     day = datetime.now().strftime("%Y-%m-%d")
-    log_note = f"claude-maxer/log/{day}.md"
+    note = log_note(day)
     reset = u["five_reset"]
     deadline = reset - KILL_MARGIN_S
     start_five = u["five_pct"]
-    vault_append(
-        log_note,
+    vault_decision(
+        time.time(), u,
         f"\n### {hm(time.time())} run — window resets {hm(reset)}, "
-        f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (pace line {weekly_line(u, time.time()):.0f}%) "
-        f"· [[claude-maxer/news/{day}|news {day}]]\n\n",
-        heading=f"# claude-maxer log — {day}\n\nWritten only when claude-maxer runs tasks. "
-                f"News lands in claude-maxer/news/.\n",
+        f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (today's ceiling "
+        f"{day_budget(u, time.time())['ceiling']}%) · [[claude-maxer/news/{day}|news {day}]]\n",
     )
     log("run_start", five=u["five_pct"], seven=u["seven_pct"], resets=reset)
 
@@ -407,11 +443,11 @@ def cmd_run(dry_run):
                 tasks_done += 1
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
                         f"· ${r['cost']:.2f}\n")
-            vault_append(log_note, line)
+            vault_append(note, line)
             log("task", **r)
-        vault_append(log_note, f"- 5h now {u['five_pct']}% (batch of {len(batch)}: +{delta:.0f}pp)\n")
+        vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(batch)}: +{delta:.0f}pp)\n")
 
-    vault_append(log_note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
+    vault_append(note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
                            f"5h {start_five}% → {u['five_pct']}%\n")
     log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2),
         five_start=start_five, five_end=u["five_pct"])
@@ -436,7 +472,10 @@ def cmd_open(dry_run):
     if window_open(u, now):
         wait = u["five_reset"] - now
         if wait > OPEN_WAIT_MAX_S:
-            log("open_skip", reason=f"a window is already open until {hm(u['five_reset'])}")
+            why = f"a window is already open until {hm(u['five_reset'])}"
+            log("open_skip", reason=why)
+            if not dry_run:
+                vault_decision(now, u, f"- {hm(now)} open · skipped: {why}")
             return 0
         if dry_run:
             print(f"DRY RUN: would wait {wait / 60:.1f} min for the {hm(u['five_reset'])} reset, then ping")
@@ -450,6 +489,12 @@ def cmd_open(dry_run):
     u = fresh_usage()
     log("opened" if rc == 0 else "open_failed", rc=rc, resets=u["five_reset"],
         resets_hm=hm(u["five_reset"]) if u["five_reset"] else None)
+    t = time.time()
+    if rc == 0:
+        vault_decision(t, u, f"- {hm(t)} open · opened a window, resets "
+                             f"{hm(u['five_reset']) if u['five_reset'] else '?'}")
+    else:
+        vault_decision(t, u, f"- {hm(t)} open · FAILED (claude exit {rc})")
     return 0 if rc == 0 else 1
 
 
@@ -457,8 +502,10 @@ def cmd_status():
     u = fresh_usage()
     now = time.time()
     ok, why = gate(u, now)
+    b = day_budget(u, now, persist=False)
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
-          f"  | 7d {u['seven_pct']}%  pace line {weekly_line(u, now):.0f}%")
+          f"  | 7d {u['seven_pct']}%  today's budget {b['budget']}pp "
+          f"(from {b['seven_start']}% → ceiling {b['ceiling']}%, {b['days_left']} days left)")
     print(f"tasks from SKILL.md: {', '.join(t[1] for t in TASKS)}")
     print(f"settings: {CFG}")
     print("run would start tasks now" if ok else f"run would skip: {why}")
@@ -470,7 +517,7 @@ def main():
     ap.add_argument("command", choices=["run", "open", "status"])
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
-    if a.command in ("run", "status"):
+    if a.command in ("run", "open", "status"):
         try:
             use_skill()
         except (OSError, SkillError) as e:

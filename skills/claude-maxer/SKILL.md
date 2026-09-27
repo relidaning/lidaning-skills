@@ -41,18 +41,21 @@ cap limits the total anyway.
 ```maxer-settings
 target_5h: 95          # stop filling a window at this 5h %
 overshoot: 3           # never start a task likely to end above target + this
-weekly_target: 95      # the 7d % to reach by the weekly reset...
-weekly_slack: 5        # ...paced evenly across the week, plus this much slack
+weekly_target: 95      # spend the week up to this 7d %, split into daily budgets
 concurrency: 3         # tasks run in parallel per batch
 model: claude-opus-5-5 # model for the tasks
 budget_usd: 5          # per-task cost cap (claude -p --max-budget-usd)
 task_timeout_min: 25   # per-task time cap
 ```
 
-The weekly pace line (`weekly_target × fraction of week elapsed +
-weekly_slack`) is usually what stops a run. One 95% window costs about 7pp
-of the week, so filling every window would use up the weekly cap in about
-three days. Set `weekly_slack: 100` to turn the pacing off.
+**Daily budget.** At the first decision of each day (and again if a new week
+starts), what's left of the week up to `weekly_target` is split evenly over
+the days left until the weekly reset. Today may spend one share, so today's
+7d ceiling = 7d now + share. Heavy use earlier in the week shrinks the share,
+but it never blocks a day outright. One full 95% window costs about 7pp of
+the week, so a share of ~9pp is roughly 1⅓ full windows a day. Your own
+interactive use comes out of the same budget. Raise `weekly_target` to spend
+more, but at 100 you may be locked out until the weekly reset.
 
 ## Tasks
 
@@ -90,19 +93,22 @@ Find the 10 most important stories from the last 48 hours on China's technology 
 
 - `claude-maxer/news/YYYY-MM-DD.md`: all of the day's output in one note,
   one `## HH:MM · Task` section per task.
-- `claude-maxer/log/YYYY-MM-DD.md`: one block per run (usage at start,
-  link to the news note), a line per task and per batch, and why it stopped.
+- `claude-maxer/log/YYYY-MM-DD.md`: today's budget, then one line for
+  **every scheduled decision** (each `open` and `run`, including skips and
+  why), and a block for each run that starts tasks: usage at start, a link
+  to the news note, a line per task and per batch, and why it stopped.
 
 Notes are written straight to the vault folder
 (`/data/nextcloud_client/obsidian/lidaning`), not through the obsidian-vault
-MCP container, whose sessions hung mid-run on 2026-09-27. Checks, skips,
-pings and errors go only to `~/.claude/state/claude-maxer.log.jsonl`. If
+MCP container, whose sessions hung mid-run on 2026-09-27. Everything also goes
+to `~/.claude/state/claude-maxer.log.jsonl`. Manual `status`/`--dry-run`
+calls are never written to the vault. If
 this file can't be parsed, `run` logs `skill_error` there and does nothing.
 
 ## Commands
 
 ```
-./run_maxer_work.sh status          # usage, pace line, parsed tasks/settings, run decision
+./run_maxer_work.sh status          # usage, today's budget, parsed tasks/settings, run decision
 ./run_maxer_work.sh run --dry-run   # gate decision + the first task's full prompt
 ./run_maxer_work.sh open --dry-run  # what the opener would do
 ```
