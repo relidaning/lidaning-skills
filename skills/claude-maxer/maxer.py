@@ -229,7 +229,8 @@ def day_budget(u, now, persist=True):
     try:
         with open(BUDGET_PATH) as f:
             b = json.load(f)
-        if b.get("date") == today and b.get("seven_reset") == u["seven_reset"]:
+        if b.get("date") == today and abs((b.get("seven_reset") or 0)
+                                          - (u["seven_reset"] or 0)) < SAME_RESET_S:
             return dict(b, new=False)
     except (OSError, ValueError):
         pass
