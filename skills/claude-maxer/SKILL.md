@@ -24,20 +24,31 @@ reliably keep time.
 
 | cron                        | command | does                                                     |
 | --------------------------- | ------- | -------------------------------------------------------- |
-| `0 3,8,13,18,23 * * *`      | `open`  | starts a 5h window (waits up to 20 min for a late reset) |
-| `0 2,7,12,17,22 * * *`      | `run`   | fills the window that's open, about 1h before it ends    |
+| `*/10 * * * *`              | `tick`  | decides from the real 5h reset time (below)              |
 | `*/15 * * * *`              | fetch   | refreshes the usage snapshot (costs no quota)            |
 
+The 5h window rolls: it opens on the first request after the last one
+expired, whoever sends it, so its reset isn't at a fixed hour. Fixed cron
+times for `run` filled windows at the wrong time whenever the reset had
+drifted, so the timing lives in `maxer.py` and cron only wakes it up:
+
+- **Window open** → `run` once per window, `RUN_LEAD_MIN` (60) before its
+  actual reset. A window you opened at 10:40 gets filled from ~14:40.
+- **No window open, during a pin hour** (`OPEN_HOURS`: 03, 08, 13, 18, 23)
+  → `open` once per pin hour. A late reset (say 08:40) is picked up at the
+  next tick in the same hour, and a failed ping retries on the next tick.
+- **Anything else** → exit without writing anything. `open` and `run` log
+  their own decisions, skips included, so each window and pin gets one line
+  in the vault log, not one per tick.
+
 The remote routine `claude-maxer-daily-ping` (`trig_01NMTNTnaybi5FP4XqKx5uBs`,
-cron `10 0,5,10,15,19 * * *` UTC = 10 min after each local `open`) is the
+cron `10 0,5,10,15,19 * * *` UTC = 10 min after each pin) is the
 backup opener in case this machine is off. Manage the local block with
 `./enroll_cron.sh install|remove|status|print`.
 
 **24h isn't a multiple of 5h.** A window lasts exactly 5h from its first
-request, so the 23:00 window runs until 04:00. The 03:00 `open` finds it
-still open and does nothing, the 02:00 `run` fills the 23:00 window, the
-07:00 `run` usually finds no window (it never opens one), and 08:00 starts
-the next window. That's four real windows a day (23, 08, 13, 18). The weekly
+request, so the 23:00 window runs until 04:00 and the 03:00 pin finds it
+still open. That's four real windows a day (23, 08, 13, 18). The weekly
 cap limits the total anyway.
 
 ## Settings
@@ -141,8 +152,8 @@ Find the 10 most important stories from the last 48 hours on China's technology 
   (what it is, findings, what was chosen and why, before → after, what's
   left for you). The fix itself is a PR in the app's repo.
 - `claude-maxer/log/YYYY-MM-DD.md`: today's budget, then one line for
-  **every scheduled decision** (each `open` and `run`, including skips and
-  why), and a block for each run that starts tasks: usage at start, a link
+  **every scheduled decision** (each `open` and `run` a tick starts,
+  including skips and why), and a block for each run that starts tasks: usage at start, a link
   to the news note, a line per task and per batch, and why it stopped.
 
 Notes are written straight to the vault folder
@@ -155,7 +166,7 @@ this file can't be parsed, `run` logs `skill_error` there and does nothing.
 ## Commands
 
 ```
-./run_maxer_work.sh status          # usage, today's budget, parsed tasks/settings, run decision
+./run_maxer_work.sh status          # usage, today's budget, parsed tasks/settings, run decision, next tick action
 ./run_maxer_work.sh run --dry-run   # gate decision + the first task's full prompt
 ./run_maxer_work.sh open --dry-run  # what the opener would do
 ./run_maxer_work.sh off             # switch off until `on`
@@ -166,7 +177,7 @@ this file can't be parsed, `run` logs `skill_error` there and does nothing.
 ```
 
 **The switch.** `off` writes `~/.claude/state/claude-maxer-off.json`; while
-it exists, every scheduled `open` and `run` does nothing and logs
+it exists, every `open` and `run` a tick starts does nothing and logs
 `skipped: switched off …` (so the vault log still shows the machine is alive),
 and a run already in progress stops starting new tasks. `--until` expires it
 by itself. The crontab stays untouched. When the user asks to pause, disable,

@@ -8,6 +8,11 @@ vault.
 
 Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
 
+  tick    What cron runs, every 10 min. Follows the real reset time instead
+          of fixed hours: calls `run` once per window when it is within
+          RUN_LEAD_MIN of its reset, and `open` once per pin hour
+          (OPEN_HOURS) when no window is open. Every other tick exits
+          without writing anything.
   open    Start a 5h window with a one-word Haiku ping. If a window is still
           open and resets within 20 min, wait for the reset and ping right
           after it. If it resets later than that, do nothing.
@@ -40,7 +45,7 @@ Vault output (written only when tasks run), under the vault root:
   claude-maxer/optimize/<app>.md    one dated report per optimize task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
-Usage: maxer.py run|open|status [--dry-run] | off [--until WHEN] | on
+Usage: maxer.py tick | run|open|status [--dry-run] | off [--until WHEN] | on
                | weekly off [--until WHEN] | weekly on
 """
 import argparse
@@ -67,6 +72,8 @@ PAUSE_PATH = os.path.join(STATE_DIR, "claude-maxer-off.json")  # present = pause
 WEEKLY_OFF_PATH = os.path.join(STATE_DIR, "claude-maxer-weekly-off.json")  # present = ignore 7d
 WORK_DIR = os.path.join(STATE_DIR, "claude-maxer-work")  # neutral cwd: no repo CLAUDE.md
 RUN_LOCK = "/tmp/claude-maxer-run.lock"
+TICK_LOCK = "/tmp/claude-maxer-tick.lock"
+TICK_PATH = os.path.join(STATE_DIR, "claude-maxer-tick.json")  # window/pin a tick already handled
 # Shared with the */15 fetch cron: fetch_usage_oauth.py rotates a single-use
 # OAuth refresh token, so two fetchers must never overlap.
 FETCH_LOCK = "/tmp/claude-usage-fetch.lock"
@@ -76,6 +83,9 @@ STOP_MARGIN_MIN = 10       # stop starting tasks this close to the reset
 KILL_MARGIN_S = 120        # hard-kill running tasks this long before the reset
 SNAPSHOT_MAX_AGE_S = 20 * 60
 OPEN_WAIT_MAX_S = 20 * 60  # opener waits for a reset at most this long
+OPEN_HOURS = (3, 8, 13, 18, 23)  # tick opens a window only during these hours
+RUN_LEAD_MIN = 60          # tick starts `run` this long before the window resets
+SAME_RESET_S = 300         # resets_at jitters between fetches; this close = same window
 DEFAULT_TASK_PCT = 4.0     # first guess at 5h% per task; replaced by measurement
 PING_MODEL = "claude-haiku-4-5-20251001"
 
@@ -926,6 +936,58 @@ def cmd_open(dry_run):
     return 0 if rc == 0 else 1
 
 
+def pin_slot(now):
+    """Start of the pin hour `now` is in, or None. Windows are opened only
+    here, so a window someone else opened off-pin doesn't make every later
+    window drift with it."""
+    d = datetime.fromtimestamp(now)
+    if d.hour not in OPEN_HOURS:
+        return None
+    return d.replace(minute=0, second=0, microsecond=0).timestamp()
+
+
+def cmd_tick():
+    """Cron runs this every 10 min. `run` fires once per window, RUN_LEAD_MIN
+    before its actual reset; `open` fires once per pin hour, only when no
+    window is open. open/run log their own decisions (skips included), so a
+    window or pin gets one vault line, not one per tick."""
+    lk = open(TICK_LOCK, "w")
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0  # an earlier tick is still running or waiting on a reset
+    try:
+        with open(TICK_PATH) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+
+    def save():
+        with open(TICK_PATH, "w") as f:
+            json.dump(st, f)
+
+    now = time.time()
+    u = read_usage()  # the */15 fetch keeps it fresh; open/run refresh again anyway
+    if u["age"] > 10 * 60:
+        u = fresh_usage()
+    if window_open(u, now):
+        reset = u["five_reset"]
+        # +90s: cron starts a few seconds late and resets_at jitters
+        if reset - now > RUN_LEAD_MIN * 60 + 90 or abs(st.get("ran_for", 0) - reset) < SAME_RESET_S:
+            return 0
+        st["ran_for"] = reset
+        save()
+        return cmd_run(False)
+    slot = pin_slot(now)
+    if slot is None or st.get("opened_for") == slot:
+        return 0
+    rc = cmd_open(False)
+    if rc == 0:  # a failed ping retries on the next tick while the pin hour lasts
+        st["opened_for"] = slot
+        save()
+    return rc
+
+
 def cmd_status():
     u = fresh_usage()
     now = time.time()
@@ -942,12 +1004,18 @@ def cmd_status():
     print(f"news tasks from {src}: {', '.join(t[1] for t in news)}")
     print(f"settings: {CFG}")
     print("run would start tasks now" if ok else f"run would skip: {why}")
+    if window_open(u, now):
+        print(f"tick: runs at ~{hm(u['five_reset'] - RUN_LEAD_MIN * 60)} "
+              f"({RUN_LEAD_MIN} min before the {hm(u['five_reset'])} reset)")
+    else:
+        pins = ", ".join(f"{h:02d}" for h in OPEN_HOURS)
+        print(f"tick: no window open; opens one in the next pin hour ({pins})")
     return 0
 
 
 def main():
     ap = argparse.ArgumentParser(description="claude-maxer")
-    ap.add_argument("command", choices=["run", "open", "status", "off", "on", "weekly"])
+    ap.add_argument("command", choices=["tick", "run", "open", "status", "off", "on", "weekly"])
     ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--until", help="with off: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
@@ -960,13 +1028,15 @@ def main():
         if not a.state:
             ap.error("weekly needs on or off")
         return cmd_weekly(a.state, a.until)
-    if a.command in ("run", "open", "status"):
+    if a.command in ("tick", "run", "open", "status"):
         try:
             use_skill()
         except (OSError, SkillError) as e:
             # Don't guess at a half-parsed skill: log loudly and do nothing.
             log("skill_error", error=str(e))
             return 1
+    if a.command == "tick":
+        return cmd_tick()
     if a.command == "run":
         return cmd_run(a.dry_run)
     if a.command == "open":

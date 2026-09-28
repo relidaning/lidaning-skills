@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # claude-maxer: enroll/remove the crontab entries that drive maxer.py.
 #
-#   0 3,8,13,18,23 * * *   open  start a 5h window
-#   0 2,7,12,17,22 * * *   run   fill the open window, ~1h before it ends
+#   */10 * * * *   tick  maxer.py decides from the actual 5h reset time:
+#                        run ~1h before it, open a window in a pin hour
 #
-# See SKILL.md "Schedule" for why 23:00 + 03:00 can't both be real windows.
-# Times are this machine's local time (CST / Asia/Shanghai). Override with
-# MAXER_OPEN_SCHEDULE / MAXER_RUN_SCHEDULE="<cron expr>".
+# The timing lives in maxer.py (OPEN_HOURS, RUN_LEAD_MIN), not in cron,
+# because the 5h window rolls and its reset isn't at a fixed hour. Override
+# the tick interval with MAXER_TICK_SCHEDULE="<cron expr>".
 #
 # The entry lives between BEGIN/END marker comments, so install is idempotent
 # (re-running replaces the block) and remove touches nothing else in the
@@ -18,16 +18,14 @@ set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SKILL_DIR/run_maxer_work.sh"
-OPEN_SCHEDULE="${MAXER_OPEN_SCHEDULE:-0 3,8,13,18,23 * * *}"
-RUN_SCHEDULE="${MAXER_RUN_SCHEDULE:-0 2,7,12,17,22 * * *}"
+TICK_SCHEDULE="${MAXER_TICK_SCHEDULE:-*/10 * * * *}"
 LOG="/tmp/claude-maxer-cron.log"
 BEGIN="# BEGIN claude-maxer schedule (managed by enroll_cron.sh)"
 END="# END claude-maxer schedule"
 
 block() {
   echo "$BEGIN"
-  echo "$OPEN_SCHEDULE $RUNNER open >> $LOG 2>&1"
-  echo "$RUN_SCHEDULE $RUNNER run >> $LOG 2>&1"
+  echo "$TICK_SCHEDULE $RUNNER tick >> $LOG 2>&1"
   echo "$END"
 }
 
