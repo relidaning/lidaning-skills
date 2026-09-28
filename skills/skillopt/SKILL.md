@@ -17,10 +17,11 @@ description: >
 Adapts the loop from arXiv:2605.23904 ("SkillOpt: Executive Strategy for
 Self-Evolving Agent Skills") to a single Claude Code session: treat a
 SKILL.md as the *trainable state*, propose small validated edits, keep only
-the ones that measurably help. The paper's demo (`/data/apps/myai/demo/skillopt/`)
-trains against a scoreable HR-compliance benchmark with a separate optimizer
-LLM and dozens of API rollouts per step. We don't have that at that scale, but
-an automated trigger check does exist: run the candidate against fixed probe
+the ones that measurably help. The paper's reference code
+(`/data/open-app/SkillOpt/`, loop in `skillopt/engine/trainer.py`) trains
+against scoreable benchmarks (SearchQA, ALFWorld, …) with a separate
+optimizer LLM and dozens of API rollouts per step. We don't have that at
+that scale, but an automated trigger check does exist: run the candidate against fixed probe
 prompts with `claude -p "<prompt>" --model <id> --output-format stream-json
 --verbose` and grep the stream for `"name":"Skill"` (TRIGGERED/SKIPPED per
 probe, 2 passes per candidate since single probes are noisy). Always pass
@@ -99,16 +100,26 @@ Separate train-probe failures from successes.
 
 Each proposed edit is one of `ADD` / `DELETE` / `REPLACE`, one line of
 rationale each. If this is round 2+, also read the run dir's
-`rejected-edits.md` buffer first and do not re-propose anything already
-rejected there — treat it as evidence of a direction that doesn't work.
+`rejected-edits.md` buffer and `meta-notes.md` (step 5) first; do not
+re-propose anything already rejected there — treat it as evidence of a
+direction that doesn't work.
+
+**Aggregate** before selecting (the paper's merge stage): collapse edits
+that say the same thing into one, keeping the best wording, and record a
+**support count** — how many train probes each edit would fix. Resolve
+contradicting edits to one. No two surviving edits may touch the same text
+region, so the gate can attribute a score change to them.
 
 ### 3. Bounded edit budget
 Cap edits applied this round: **3 on round 1, 2 on round 2+** (this session's
 equivalent of the paper's cosine-decayed textual learning rate — start
-looser, tighten as the skill stabilizes). Rank proposed edits by expected
-impact on the direction criteria, apply only the top-ranked ones within
-budget to a candidate `SKILL.md`. Do not do a full rewrite — bounded,
-localized edits only, so later rounds can still tell what helped.
+looser, tighten as the skill stabilizes). Rank aggregated edits by the
+paper's criteria, in order: (1) systematic impact — higher support count
+wins over a one-probe fix; (2) complementarity — fills a gap rather than
+restating the body; (3) generality — a principle over a probe-specific
+patch; (4) actionability — concrete over vague. Apply only the top-ranked
+ones within budget to a candidate `SKILL.md`. Do not do a full rewrite —
+bounded, localized edits only, so later rounds can still tell what helped.
 
 ### 4. Validation gate — measured trigger + fresh eyes
 Two checks, both required:
@@ -123,8 +134,16 @@ Two checks, both required:
   body output would satisfy the held-out probes' criteria. Foreground this
   call — the loop can't continue without the score.
 
+Score the gate **soft**, not pass/fail: for each held-out probe, the
+fraction of direction criteria met (plus 1/0 for the trigger outcome), summed
+over probes. With only 2 held-out probes a hard all-or-nothing score almost
+never moves, so good edits get rejected as ties — the paper's `soft` gate
+metric exists for exactly this small-selection-set case. Score the current
+baseline the same way on the same probes.
+
 Accept the candidate only if **both**:
-- direction score is strictly better than baseline (ties rejected), and
+- its soft direction score is strictly better than the current baseline's
+  (ties rejected), and
 - general rubric stays ≥8/10.
 
 **Accepted**: overwrite the live `skills/<name>/SKILL.md` (plain tracked
@@ -135,15 +154,38 @@ becomes the new baseline for the next round.
 `.claude/skillopt-runs/<skill>-<timestamp>/rejected-edits.md`. Do not retry
 the same direction next round.
 
-### 5. Repeat or stop
+### 5. Round boundary — slow update + meta notes
+Per-round edits only see this round's probes and can quietly undo an
+earlier win. After each round that will be followed by another one, before
+starting it (paper's epoch-boundary mechanisms, which it runs from epoch 2;
+here rounds are few, so run it from the end of round 1):
+- **Longitudinal comparison**: judge the 4 train probes under the SKILL.md
+  this round started from and the one it ended with, and bucket each as
+  *regressed*, *persistent failure*, *improved*, or *stable success*. Skip
+  this if the round was rejected (nothing changed). Train probes only —
+  held-out probes stay reserved for the gate.
+- **Slow update**: turn regressions into must-preserve constraints and
+  persistent failures into the top reflection target for the next round.
+  If this implies a SKILL.md change, it is an ordinary candidate edit —
+  it counts against the budget and goes through the step-4 gate.
+- **Meta notes** (every boundary, rejected rounds included): overwrite
+  `meta-notes.md` in the run dir with a few optimizer-side lessons for *this* skill — which kinds of edits helped,
+  which were too vague or brittle, what level of abstraction worked.
+  Revise the previous notes rather than appending; this is advice to the
+  next reflection step, never text for the SKILL.md.
+
+### 6. Repeat or stop
 Default max rounds: **2**, hard cap **4**. Stop early if a round is rejected
 twice in a row, or the user says stop. Do not keep spending rounds chasing
 marginal gains — this is a conversational loop, not an unattended job.
 
-### 6. Report
+### 7. Report
 Print: baseline score → final score, edits applied (with rationale), edits
-rejected (with reason), and the run log path. Leave the SKILL.md change as
-an uncommitted working-tree diff — this skill never commits or opens a PR on
+rejected (with reason), and the run log path. The final score is measured
+on the same held-out probes the gate selected on, so it is optimistic —
+say so, and point to `skill-bench`'s `--split test` for an unbiased number
+(the paper keeps a separate test split for this reason). Leave the SKILL.md
+change as an uncommitted working-tree diff — this skill never commits or opens a PR on
 its own; that's the user's call, same as everywhere else in this repo.
 
 ## Defaults
@@ -153,9 +195,10 @@ its own; that's the user's call, same as everywhere else in this repo.
 | Rounds (epochs)             | 2 (max 4)             |
 | Probe set size              | 6 (4 train / 2 held-out) |
 | Edit budget                 | 3 round 1, 2 round 2+ |
-| Validation gate             | strictly greater; ties rejected |
+| Validation gate             | soft score, strictly greater; ties rejected |
 | General-rubric floor        | ≥8/10, always enforced |
 | Validator                   | fresh `general-purpose` subagent, foreground |
+| Round boundary              | longitudinal compare + `meta-notes.md` |
 
 ## Relationship to claude-maxer's skill-audit
 
