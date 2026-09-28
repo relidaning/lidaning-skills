@@ -42,7 +42,20 @@
     "mcp__rag__rag_ingest",
     "mcp__rag__rag_load",
     "mcp__rag__rag_remove",
-    "mcp__rag__rag_clear"
+    "mcp__rag__rag_clear",
+    "mcp__obsidian__write_note",
+    "mcp__obsidian__patch_note",
+    "mcp__obsidian__delete_note",
+    "mcp__obsidian__move_note",
+    "mcp__obsidian__move_file",
+    "mcp__obsidian__update_frontmatter",
+    "mcp__obsidian__manage_tags",
+    "mcp__nextcloud__nc_webdav_create_directory",
+    "mcp__nextcloud__nc_webdav_tag_file",
+    "mcp__nextcloud__nc_webdav_untag_file",
+    "mcp__nextcloud__nc_webdav_restore_version",
+    "mcp__nextcloud__nc_webdav_restore_from_trash",
+    "mcp__nextcloud__nc_webdav_create_comment"
   ],
   "notes": "",
   "reply_strip_regex": [

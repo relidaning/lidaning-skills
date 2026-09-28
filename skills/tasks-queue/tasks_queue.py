@@ -35,16 +35,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 from vault_mcp import read_note, write_note  # noqa: E402
 
 TASKS_PATH = os.environ.get("TASKS_QUEUE_PATH", "Tasks.md")
+# Test seam: a local file instead of the vault (skill-bench world cases).
+TASKS_FILE = os.environ.get("TASKS_QUEUE_FILE")
 _frontmatter = {}  # kept from the last read so a rewrite doesn't drop it
 
 
 def get_content():
     global _frontmatter
+    if TASKS_FILE:
+        with open(TASKS_FILE) as f:
+            text = f.read()
+        m = re.match(r"(?s)(---\n.*?\n---\n)(.*)", text)
+        _frontmatter, body = (m.group(1), m.group(2)) if m else ("", text)
+        return body
     _frontmatter, body = read_note(TASKS_PATH)
     return body
 
 
 def put_content(text):
+    if TASKS_FILE:
+        with open(TASKS_FILE, "w") as f:
+            f.write(_frontmatter + text)
+        return
     write_note(TASKS_PATH, text, frontmatter=_frontmatter)
 
 
@@ -292,7 +304,8 @@ def cmd_optimize():
 # whether it fits: if a repo task (vault/optimize) is too big for what's left,
 # they ask again with --small.
 
-NEWS_DAY_PATH = os.path.expanduser("~/.claude/state/tasks-queue-news-day.json")
+NEWS_DAY_PATH = os.path.expanduser(
+    os.environ.get("TASKS_QUEUE_NEWS_DAY", "~/.claude/state/tasks-queue-news-day.json"))
 
 
 def news_ran_today():

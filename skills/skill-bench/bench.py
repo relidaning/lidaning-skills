@@ -7,6 +7,7 @@ Stdlib only. Each target skill gets a suite under suites/<skill>/:
     cases.jsonl    one case per line (trigger or behavior), each with a split
     CARD.md        benchmark card: what is measured, how the data was built
     fixtures/      optional files referenced from prompts as {fixtures}/...
+    worlds/<name>/ optional fake state; a case with "world" runs in a fresh copy
     history.jsonl  one summary line per run (the leaderboard)
 
 Subcommands:
@@ -21,7 +22,9 @@ Subcommands:
 Every trial is one headless `claude -p` session in the repo root (the skill's
 real environment) with write-capable tools disallowed. Trigger = a `Skill` tool
 call whose `skill` input names the target. Behavior = deterministic checks
-(gates) + a blind LLM judge scoring a binary rubric.
+(gates) + a blind LLM judge scoring a binary rubric. World cases instead run
+in a temp copy of their world under an allowlist (dontAsk mode) and can gate on
+the world's end state (file_* checks) and on the decision in the reply.
 """
 
 from __future__ import annotations
@@ -72,6 +75,21 @@ SAFE_DISALLOWED = [
     "mcp__rag__rag_load",
     "mcp__rag__rag_remove",
     "mcp__rag__rag_clear",
+    # the obsidian server's real write tools (the vault_* names above are an
+    # older server's; they never matched, so the vault was writable until 2026-09-28)
+    "mcp__obsidian__write_note",
+    "mcp__obsidian__patch_note",
+    "mcp__obsidian__delete_note",
+    "mcp__obsidian__move_note",
+    "mcp__obsidian__move_file",
+    "mcp__obsidian__update_frontmatter",
+    "mcp__obsidian__manage_tags",
+    "mcp__nextcloud__nc_webdav_create_directory",
+    "mcp__nextcloud__nc_webdav_tag_file",
+    "mcp__nextcloud__nc_webdav_untag_file",
+    "mcp__nextcloud__nc_webdav_restore_version",
+    "mcp__nextcloud__nc_webdav_restore_from_trash",
+    "mcp__nextcloud__nc_webdav_create_comment",
 ]
 TRIGGER_CATEGORIES = {
     "positive": {
@@ -94,7 +112,39 @@ CHECK_KINDS = {
     "tool_not_called",
     "skill_called",
     "skill_not_called",
+    "decision",
 }
+# Checks on the world copy after the trial (paths are relative to the world).
+STATE_KINDS = {
+    "file_regex",
+    "file_not_regex",
+    "file_exists",
+    "file_absent",
+    "file_unchanged",
+}
+CHECK_KINDS |= STATE_KINDS
+# World cases run in a throw-away copy of suites/<skill>/worlds/<name>/ under
+# `--permission-mode dontAsk`: only these tools plus the suite's/case's
+# `allowed_tools` are usable; anything else is denied without a prompt.
+# Read rules also govern Glob/Grep, so those are scoped by the Read patterns
+# rather than allowed bare (a bare Read let a smoke trial read the real vault's
+# Tasks.md and ~/.claude/state instead of the world's copy, 2026-09-28).
+# `cd` is allowed because models naturally run `cd <skill dir> && python3 x.py`.
+WORLD_BASE_ALLOWED = [
+    "Skill",
+    "Read(./**)",
+    f"Read(/{REPO}/skills/**)",
+    f"Read(/{REPO}/.claude/skills/**)",
+    "Bash(cd *)",
+    # harmless shell reflexes (`…; echo "exit:$?"`, `ls`); denying them made a
+    # smoke trial give up on the skill entirely. cat/head stay denied: they
+    # could read outside the world.
+    "Bash(echo *)",
+    "Bash(ls *)",
+    "Bash(ls)",
+    "Bash(pwd)",
+]
+DENIED_RE = re.compile(r"has been denied because Claude Code is running in don't ask mode")
 # Blocks other always-on skills add to every reply; stripped before checks/judge
 # so they don't count toward length caps or match content regexes.
 DEFAULT_STRIP = r"(?s)=== English Practice ===.*?=== English Practice ===\s*"
@@ -382,11 +432,22 @@ def validate(skill: str, quiet: bool = False, ignore_hash: bool = False) -> list
             for ch in checks:
                 if ch.get("kind") not in CHECK_KINDS:
                     errs.append(f"{cid}: unknown check kind {ch.get('kind')}")
-                if ch.get("kind") in ("regex", "not_regex"):
+                kind = ch.get("kind")
+                pats = [ch.get("pattern", "")] if kind in (
+                    "regex", "not_regex", "decision", "file_regex", "file_not_regex"
+                ) else []
+                for pat in pats + list(ch.get("reject", [])):
                     try:
-                        re.compile(ch.get("pattern", ""))
+                        re.compile(pat)
                     except re.error as e:
-                        errs.append(f"{cid}: bad regex {ch.get('pattern')!r}: {e}")
+                        errs.append(f"{cid}: bad regex {pat!r}: {e}")
+                if kind in ("decision", "file_regex", "file_not_regex") and not ch.get("pattern"):
+                    errs.append(f"{cid}: {kind} check needs a 'pattern'")
+                if kind in STATE_KINDS:
+                    if not c.get("world"):
+                        errs.append(f"{cid}: {kind} check needs the case to have a 'world'")
+                    if not ch.get("path") or Path(ch["path"]).is_absolute() or ".." in Path(ch["path"]).parts:
+                        errs.append(f"{cid}: {kind} check needs a relative 'path' inside the world")
             ids = [r.get("id") for r in rubric]
             if len(ids) != len(set(ids)) or any(not i for i in ids):
                 errs.append(f"{cid}: rubric items need unique ids")
@@ -395,6 +456,15 @@ def validate(skill: str, quiet: bool = False, ignore_hash: bool = False) -> list
                     errs.append(f"{cid}: rubric item {r.get('id')} has no criterion")
         else:
             errs.append(f"{cid}: type must be trigger|behavior")
+        if c.get("world"):
+            if not (suite_dir(skill) / "worlds" / str(c["world"])).is_dir():
+                errs.append(f"{cid}: missing world dir worlds/{c['world']}/")
+        elif c.get("env") or c.get("allowed_tools") or "{world}" in p:
+            errs.append(f"{cid}: env/allowed_tools/{{world}} only apply to world cases")
+        if not isinstance(c.get("env", {}), dict):
+            errs.append(f"{cid}: env must be an object of VAR: value")
+        if not isinstance(c.get("allowed_tools", []), list):
+            errs.append(f"{cid}: allowed_tools must be a list")
         if "{fixtures}" in p:
             for ref in re.findall(r"\{fixtures\}/([\w./-]+)", p):
                 if not (suite_dir(skill) / "fixtures" / ref).exists():
@@ -529,8 +599,10 @@ def parse_stream(raw: str, target: str) -> dict:
         "is_error": False,
         "subtype": None,
         "model": None,
+        "denied": [],
     }
     last_text = []
+    by_id = {}
     for line in raw.splitlines():
         try:
             e = json.loads(line)
@@ -544,11 +616,20 @@ def parse_stream(raw: str, target: str) -> dict:
             for b in e.get("message", {}).get("content", []):
                 if b.get("type") == "tool_use":
                     inp = b.get("input") or {}
+                    by_id[b.get("id")] = b
                     out["tool_calls"].append({"name": b.get("name"), "input": inp})
                     if b.get("name") == "Skill":
                         out["skill_calls"].append(str(inp.get("skill", "")))
                 elif b.get("type") == "text":
                     last_text.append(b.get("text", ""))
+        elif t == "user":
+            for b in (e.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result" and DENIED_RE.search(
+                    json.dumps(b.get("content"), ensure_ascii=False)
+                ):
+                    u = by_id.get(b.get("tool_use_id")) or {}
+                    inp = json.dumps(u.get("input") or {}, ensure_ascii=False)
+                    out["denied"].append(f"{u.get('name')}({inp[:160]})")
         elif t == "result":
             out["cost_usd"] = e.get("total_cost_usd") or 0.0
             out["duration_ms"] = e.get("duration_ms")
@@ -604,6 +685,7 @@ def run_claude(
     timeout_s: int,
     cwd: Path,
     extra: list[str] | None = None,
+    env_extra: dict | None = None,
 ) -> tuple[str, str, int]:
     cmd = [
         claude_bin(),
@@ -623,7 +705,7 @@ def run_claude(
             cmd,
             input=prompt,
             cwd=cwd,
-            env=child_env(),
+            env={**child_env(), "PWD": str(cwd), **(env_extra or {})},
             capture_output=True,
             text=True,
             timeout=timeout_s,
@@ -634,7 +716,10 @@ def run_claude(
         return so, "TIMEOUT", -9
 
 
-def eval_checks(checks: list[dict], tr: dict, target: str) -> list[dict]:
+def eval_checks(
+    checks: list[dict], tr: dict, target: str, world: dict | None = None
+) -> list[dict]:
+    """world = {"dir": Path, "before": {relpath: sha256}} for world cases."""
     text = tr["text"] or ""
     words = len(re.findall(r"\S+", text))
     res = []
@@ -673,11 +758,34 @@ def eval_checks(checks: list[dict], tr: dict, target: str) -> list[dict]:
             name = ch.get("name", target)
             hit = any(s == name or s.endswith(":" + name) for s in tr["skill_calls"])
             ok = hit if k == "skill_called" else not hit
+        elif k == "decision":
+            # The expected decision must appear, and none of the wrong ones.
+            ok = re.search(ch["pattern"], text, flags) is not None and not any(
+                re.search(p, text, flags) for p in ch.get("reject", [])
+            )
+        elif k in STATE_KINDS:
+            if world is None:
+                ok = False  # validate() rejects this; a state check needs a world
+            else:
+                f = world["dir"] / ch["path"]
+                body = f.read_text(errors="replace") if f.is_file() else None
+                if k == "file_exists":
+                    ok = f.exists()
+                elif k == "file_absent":
+                    ok = not f.exists()
+                elif k == "file_unchanged":
+                    ok = world["before"].get(ch["path"]) == (
+                        sha256_file(f) if f.is_file() else None
+                    )
+                elif k == "file_regex":
+                    ok = body is not None and re.search(ch["pattern"], body, flags) is not None
+                else:  # file_not_regex: a missing file has no forbidden content
+                    ok = body is None or re.search(ch["pattern"], body, flags) is None
         res.append(
             {
                 "kind": k,
                 "desc": ch.get("desc")
-                or ch.get("pattern")
+                or " ".join(filter(None, [ch.get("path"), ch.get("pattern")]))
                 or ch.get("name")
                 or str(ch.get("n", "")),
                 "pass": ok,
@@ -703,6 +811,7 @@ def judge(
     timeout_s: int,
     work: Path,
     raw_path: Path | None = None,
+    world_changed: list[str] | None = None,
 ) -> dict:
     """Grade one reply against the case's binary rubric. The judge's raw stream is
     kept next to the trial's (raw_path) so a disputed grade can be audited, and its
@@ -720,7 +829,14 @@ def judge(
             else ""
         )
         + f"## Tool calls the assistant made\n{trace_summary(tr)}\n\n"
-        f"## Assistant's final reply\n<<<\n{(tr['text'] or '')[:14000]}\n>>>\n\n"
+        + (
+            "## Files the session changed in its sandbox\n"
+            + ("\n".join(f"- {f}" for f in world_changed) or "(none)")
+            + "\n\n"
+            if world_changed is not None
+            else ""
+        )
+        + f"## Assistant's final reply\n<<<\n{(tr['text'] or '')[:14000]}\n>>>\n\n"
         f"## Checklist\n{crit}\n\n"
         'Return exactly: {"criteria":[{"id":"<id>","met":true|false,"evidence":"<short quote or reason>"}]}'
     )
@@ -773,6 +889,60 @@ def judge(
     return {"score": None, "criteria": [], "error": last_err, "cost_usd": cost}
 
 
+def world_files(d: Path) -> dict:
+    """{relpath: sha256} of the world's own regular files (not the symlinked
+    skills/CLAUDE.md the harness adds)."""
+    out = {}
+    for p in sorted(d.rglob("*")):
+        rel = p.relative_to(d)
+        if rel.parts[0] in (".claude", "CLAUDE.md") or p.is_symlink() or not p.is_file():
+            continue
+        out[str(rel)] = sha256_file(p)
+    return out
+
+
+def setup_world(skill: str, name: str) -> Path:
+    """A fresh copy of suites/<skill>/worlds/<name>/ outside the repo, so the
+    trial can't pick up the repo's settings.local.json allow rules. The repo's
+    installed skills and CLAUDE.md are symlinked in so the model sees the same
+    skill list and instructions as in real use."""
+    d = Path(tempfile.mkdtemp(prefix=f"skill-bench-world-{name}-"))
+    shutil.copytree(suite_dir(skill) / "worlds" / name, d, dirs_exist_ok=True, symlinks=True)
+    sk = d / ".claude" / "skills"
+    sk.mkdir(parents=True, exist_ok=True)
+    installed = REPO / ".claude" / "skills"
+    for p in sorted(installed.iterdir()) if installed.is_dir() else []:
+        # An installed skill dir may hold only a symlinked SKILL.md; link the
+        # real source dir so the skill's scripts sit next to it, as in the repo.
+        src = (p / "SKILL.md").resolve().parent if (p / "SKILL.md").exists() else p.resolve()
+        if not (sk / p.name).exists():
+            (sk / p.name).symlink_to(src)
+    if (REPO / "CLAUDE.md").exists() and not (d / "CLAUDE.md").exists():
+        (d / "CLAUDE.md").symlink_to(REPO / "CLAUDE.md")
+    return d
+
+
+def expand(s: str, world: Path | None, skill: str) -> str:
+    s = s.replace("{fixtures}", str(suite_dir(skill) / "fixtures")).replace("{repo}", str(REPO))
+    return s.replace("{world}", str(world)) if world else s
+
+
+def world_args(case: dict, suite: dict, disallowed: list[str]) -> tuple[list[str], list[str]]:
+    """Allowlist mode: dontAsk + explicit --allowedTools. A tool that is
+    allowlisted (even by pattern, e.g. Bash(python3 *x.py*)) is dropped from
+    the blanket deny list, since deny rules win over allow rules."""
+    allowed = (
+        WORLD_BASE_ALLOWED
+        + suite.get("sandbox", {}).get("allowed_tools", [])
+        + case.get("allowed_tools", [])
+    )
+    names = {a.split("(")[0] for a in allowed}
+    return (
+        ["--permission-mode", "dontAsk", "--allowedTools", *allowed],
+        [d for d in disallowed if d not in names],
+    )
+
+
 def run_trial(
     job: dict, suite: dict, run_dir: Path, stop: threading.Event, judge_dir: Path
 ) -> dict:
@@ -780,15 +950,49 @@ def run_trial(
         return {**job["meta"], "status": "skipped"}
     case, model, cond, t = job["case"], job["model"], job["cond"], job["trial"]
     target = suite["target_skill"]
-    prompt = case["prompt"].replace("{fixtures}", str(suite_dir(target) / "fixtures"))
+    raw_name = f"{case['id']}__{model}__{cond}__t{t}.jsonl"
     disallowed = list(suite.get("disallowed_tools", SAFE_DISALLOWED))
+    extra: list[str] = []
+    if case.get("world"):
+        extra, disallowed = world_args(case, suite, disallowed)
     if cond == "no-skill":
         # Deny only the target. Disabling the whole Skill tool also removes
         # always-on skills (english-practice) whose absence the model then
         # narrates in its reply, and the judge penalizes the baseline for it.
         disallowed.append(f"Skill({target})")
+    holder: dict = {}
+    try:
+        return _run_trial(
+            job, suite, run_dir, stop, judge_dir, raw_name, disallowed, extra, holder
+        )
+    finally:
+        # Keep the world's end state next to the transcript, then drop the temp copy.
+        if holder.get("world"):
+            wd = holder["world"]["dir"]
+            dest = run_dir / "worlds" / raw_name.removesuffix(".jsonl")
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(wd, dest, ignore=shutil.ignore_patterns(".claude", "CLAUDE.md"))
+            shutil.rmtree(wd, ignore_errors=True)
+
+
+def _run_trial(
+    job, suite, run_dir, stop, judge_dir, raw_name, disallowed, extra, holder
+) -> dict:
+    case, model, cond, t = job["case"], job["model"], job["cond"], job["trial"]
+    target = suite["target_skill"]
+    world = None
     for attempt in range(TRANSIENT_RETRIES + 1):
-        so, se, rc = run_claude(prompt, model, disallowed, job["timeout"], REPO)
+        if case.get("world"):
+            if world:  # a retry starts from a clean world, not a half-mutated one
+                shutil.rmtree(world["dir"], ignore_errors=True)
+            wd = setup_world(target, case["world"])
+            world = holder["world"] = {"dir": wd, "before": world_files(wd)}
+        wd = world["dir"] if world else None
+        prompt = expand(case["prompt"], wd, target)
+        env_extra = {k: expand(str(v), wd, target) for k, v in case.get("env", {}).items()}
+        so, se, rc = run_claude(
+            prompt, model, disallowed, job["timeout"], wd or REPO, extra, env_extra
+        )
         tr = parse_stream(so, target)
         failed = rc != -9 and (tr["is_error"] or (rc != 0 and not tr["text"]))
         msg = (tr["text"] or se or "")[:300]
@@ -797,7 +1001,6 @@ def run_trial(
         if attempt < TRANSIENT_RETRIES and not stop.is_set():
             log(f"{case['id']} {model} {cond} t{t}: transient error, retrying — {msg[:80]}")
             stop.wait(TRANSIENT_BACKOFF_S * (attempt + 1))
-    raw_name = f"{case['id']}__{model}__{cond}__t{t}.jsonl"
     (run_dir / "raw" / raw_name).write_text(so + (f"\n//STDERR {se}" if se else ""))
     rec = {
         **job["meta"],
@@ -810,7 +1013,14 @@ def run_trial(
         "triggered": tr["triggered"],
         "trigger_before_work": tr["trigger_before_work"],
         "tool_names": [c["name"] for c in tr["tool_calls"]],
+        "denied": tr["denied"],
     }
+    if world:
+        after = world_files(world["dir"])
+        rec["world"] = case["world"]
+        rec["world_changed"] = sorted(
+            f for f in set(after) | set(world["before"]) if after.get(f) != world["before"].get(f)
+        )
     if rc == -9:
         return {**rec, "status": "error", "error": "timeout"}
     if tr["is_error"] or (rc != 0 and not tr["text"]):
@@ -832,7 +1042,7 @@ def run_trial(
         rec["status"] = "ok"
         rec["correct"] = rec["triggered"] == (case["label"] == "positive")
         return rec
-    checks = eval_checks(case.get("checks", []), tr, target)
+    checks = eval_checks(case.get("checks", []), tr, target, world)
     j = judge(
         case,
         tr,
@@ -840,6 +1050,7 @@ def run_trial(
         job["timeout"],
         judge_dir,
         raw_path=run_dir / "raw" / raw_name.replace(".jsonl", "__judge.jsonl"),
+        world_changed=rec.get("world_changed"),
     )
     rec.update({"checks": checks, "judge": j, "judge_cost_usd": j.get("cost_usd", 0.0)})
     if j["score"] is None:
@@ -1382,6 +1593,13 @@ def aggregate(results: list[dict], man: dict) -> dict:
             warn.append(
                 "suite is saturated — every case passed every trial, so it can catch "
                 "regressions but can't show improvements; add harder cases (freeze --bump minor)"
+            )
+        hit = sorted({r["case_id"] for r in ok if r.get("denied") and r.get("cond") == "skill"})
+        if hit:
+            warn.append(
+                f"{len(hit)} case(s) hit sandbox denials ({', '.join(hit)}): a failure there may "
+                "be the allowlist, not the skill — read the trials' `denied` list and widen "
+                "`sandbox.allowed_tools` if the denied call was legitimate"
             )
         s["warnings"] = warn
         by_model[m] = s

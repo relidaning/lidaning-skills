@@ -141,6 +141,49 @@ and refer to it as `{fixtures}/name.md`.
   indistinguishable from zero.
 - A case may cite several claims: `"claim": "B1,B3"`.
 
+**World cases** (decision and tool-calling skills). First place the skill on
+three axes: *input* (prompt, or prompt + world state), *output* (text,
+decision, or actions), *grader* (code check, state check, or judge). If the
+skill decides from state (usage numbers, a task list) or acts through its
+scripts, a prompt-only case can only quiz it on its docs. Give it a **world**
+instead:
+
+```json
+{"id":"tq-b-001","split":"test","type":"behavior","claim":"B1","world":"two-undone",
+ "env":{"TASKS_QUEUE_FILE":"{world}/Tasks.md"},
+ "prompt":"what should claude work on next?",
+ "checks":[{"kind":"tool_called","name":"Bash","input_regex":"tasks_queue\\.py"},
+           {"kind":"decision","pattern":"(?i)upload test","reject":["(?i)write the docs"]},
+           {"kind":"file_unchanged","path":"Tasks.md"}],
+ "rubric":[...]}
+```
+
+- `world` names a folder `suites/<skill>/worlds/<name>/`. Each trial gets a
+  fresh copy in a temp dir **outside the repo** (so the repo's
+  `settings.local.json` allow rules don't apply), with the repo's installed
+  skills and `CLAUDE.md` symlinked in. The end state is archived to the run's
+  `worlds/<trial>/`.
+- `env` is injected into the trial, and `{world}` expands to that trial's copy
+  (in `env` and `prompt`; `{repo}` expands to the repo root). This is the
+  **test seam**: the skill's scripts must read their state from an env var
+  (e.g. `TASKS_QUEUE_FILE`) so the trial never touches the real vault, usage
+  endpoint or crontab. If the skill has no seam, adding one is part of
+  building the suite. Say so, and keep it a small, default-off change.
+- World trials run under `--permission-mode dontAsk` with an **allowlist**:
+  `Read`, `Glob`, `Grep`, `Skill`, plus `suite.json` → `sandbox.allowed_tools`
+  and the case's `allowed_tools` (e.g. `"Bash(python3 *tasks_queue.py*)"`).
+  Everything else is denied without a prompt. Allowlist only the commands the
+  skill documents.
+- Extra check kinds: `decision` (`pattern` must match the final reply, none of
+  `reject` may), and state checks on the world after the run: `file_regex`,
+  `file_not_regex`, `file_exists`, `file_absent`, `file_unchanged` (`path`
+  relative to the world). Prefer these to the judge. The judge also sees which
+  world files changed.
+- Write one world per **side of each decision boundary** (e.g. one undone
+  task vs. none; a done-only list; a wrapped continuation line), not random
+  states. The right answer follows from the rule, so it's a `decision` check,
+  not a rubric item.
+
 **Splits**: put about one third in `dev` and two thirds in `test`, stratified
 so every category appears in `test`. No near-duplicate prompts across splits.
 `validate` rejects exact duplicates.
