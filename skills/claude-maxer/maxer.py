@@ -791,9 +791,13 @@ def run_task(slug, title, prompt, day, deadline, lookback=1):
 sys.path.insert(0, os.path.join(SKILL_DIR, "..", "rag-chroma", "scripts"))
 PAPER_TASKS = {"Papers"}  # news task titles that get the paper memory
 PAPERS_COLLECTION = "papers"
-# Calibrated 2026-09-29 on two runs: the same paper reworded scored 0.77–0.86,
-# different papers at most 0.42.
-PAPER_DUP_SCORE = 0.65
+# Embedding similarity can't tell "same paper, reworded" from "another paper
+# on the same topic": measured 2026-09-29 on 10 papers from the vault, e5
+# scored rewordings 0.88–0.94 and different MoE papers up to 0.92 (the earlier
+# MiniLM + 0.65 setup was worse: rewordings from 0.48, different papers up to
+# 0.73). So repeats are caught by arXiv ID/URL and normalized title, and the
+# similarity check only drops near-verbatim entries.
+PAPER_DUP_SCORE = 0.95
 PAPER_PROMPT_MAX = 400  # newest papers listed in the prompt as already covered
 ARXIV_ID = re.compile(r"(?:arxiv\.org|alphaxiv\.org|huggingface\.co)/(?:abs/|pdf/|papers/)?"
                       r"(\d{4}\.\d{4,5})")
@@ -825,6 +829,11 @@ def papers_seen():
         return None
 
 
+def title_key(title):
+    """Title with case, punctuation and spacing ignored."""
+    return re.sub(r"[\W_]+", "", title.casefold())
+
+
 def papers_already(seen):
     newest = sorted(seen.items(), key=lambda kv: kv[1].get("proposed", ""), reverse=True)
     return [f"{m.get('title', pid)} ({pid})" for pid, m in newest[:PAPER_PROMPT_MAX]]
@@ -847,9 +856,13 @@ def filter_papers(body, day, seen):
         if pid in seen or any(d["id"] == pid for d in docs):
             repeats.append(title)
             continue
+        titles = {title_key(m.get("title", "")) for m in (seen or {}).values()}
+        if title_key(title) in titles | {title_key(d["metadata"]["title"]) for d in docs}:
+            repeats.append(title)
+            continue
         if seen:
             try:
-                hit = rag("rag_search", {"query": content, "k": 1,
+                hit = rag("rag_search", {"query": content, "k": 1, "mode": "vector",
                                          "collection": PAPERS_COLLECTION})["results"]
             except Exception:
                 hit = []

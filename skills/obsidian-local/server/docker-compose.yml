@@ -13,4 +13,8 @@ services:
       - "127.0.0.1:${OBSIDIAN_VAULT_MCP_PORT:-27125}:8000"
     volumes:
       - ${OBSIDIAN_VAULT_PATH:-/data/nextcloud_client/obsidian/lidaning}:/vault
+      # excluded-dirs: vault folders the server never exposes (see start.js)
+      - ./config:/config:ro
     mem_limit: 256m
+    logging:
+      options: { max-size: "10m", max-file: "2" }

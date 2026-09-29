@@ -1,20 +1,26 @@
 """rag-mcp — Source-agnostic semantic search with Obsidian vault watcher.
 
-MCP server that embeds text content via ChromaDB's built-in ONNX embedding
-function (all-MiniLM-L6-v2, no torch needed), stores in ChromaDB, and exposes
-search/ingest/load tools. Watches the Obsidian vault folder on disk for
-changes and keeps the index in sync automatically.
+MCP server that embeds text with multilingual-e5-small on ONNX Runtime (no
+torch; see embedder.py), stores it in ChromaDB, and exposes search/ingest/load
+tools. Search is hybrid: vector similarity and BM25 keyword ranking (bm25.py),
+merged by reciprocal rank fusion. Vault notes are cut at headings and
+paragraphs into token-sized chunks with a note/heading header (chunker.py).
+Watches the Obsidian vault for changes and keeps the index in sync.
 
-The vault is read from a read-only bind mount (VAULT_DIR), not the Obsidian
-app's REST API: the app isn't kept running, and when it stopped on
-2026-09-26 the watcher silently froze the index for days.
+The vault is read through the obsidian-vault MCP server (vault_client.py),
+so the index holds exactly what that server exposes. Its availability is the
+watcher's one dependency: when an earlier source (the Obsidian app's REST
+API) stopped on 2026-09-26, the index silently froze for days, so rag_status
+reports the last successful sync and the last error.
 """
 
 import asyncio
 import hashlib
+import json
+import time
 import logging
 import os
-from pathlib import Path
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -28,11 +34,16 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _log = logging.getLogger(__name__)
 
+import numpy as np
 from chromadb import HttpClient
-from chromadb.utils import embedding_functions
 from fastmcp import FastMCP
 from openai import AsyncOpenAI
 from starlette.responses import PlainTextResponse
+
+from bm25 import BM25
+from chunker import chunk_note
+from embedder import MODEL_ID, E5Embedder
+from vault_client import URL as VAULT_MCP_URL, VaultClient
 
 # ---------------------------------------------------------------------------
 # Config
@@ -41,12 +52,22 @@ from starlette.responses import PlainTextResponse
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = os.getenv("CHROMA_PORT", "8000")
 
-VAULT_DIR = Path(os.getenv("VAULT_DIR", "/vault"))
 WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL", "60"))
 
 COLLECTION_NAME = "documents"  # the vault index; other collections are opt-in
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 100
+CHUNK_TOKENS = 300          # per chunk, header included; e5 reads up to 512
+CHUNK_OVERLAP_TOKENS = 50
+# Stored in each collection's metadata. A collection built by another model
+# (or, for the vault index, another chunker) is rebuilt at startup: vectors
+# from two models must never share a collection, and MiniLM and e5 are both
+# 384-dim, so Chroma would not notice.
+CHUNKER_VERSION = "md-headings-v2"
+RRF_K = 60  # reciprocal rank fusion constant (the usual default)
+# A short query with digits/symbols ("2203.15556", "rag_mcp.py") is a lookup
+# of an exact string; embeddings rank such queries near-randomly, so BM25
+# gets this much more weight in the fusion.
+EXACT_QUERY = re.compile(r"[\d_.\-/]")
+EXACT_KEYWORD_WEIGHT = 2.0
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")   # empty = OpenAI default
@@ -78,18 +99,24 @@ After your answer include a "Sources:" line listing the document names you drew 
 
 _vault_state: dict[str, str] = {}  # path -> content md5
 _vault_mtime: dict[str, float] = {}  # path -> mtime at last check, to skip re-hashing
+_vault = VaultClient()
+_sync_status: dict = {"last_ok": None, "last_error": None, "notes": None}
 
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     for _ in range(10):
         try:
+            await asyncio.to_thread(_migrate_collections)
             await _init_vault_state()
             break
         except Exception:
             await asyncio.sleep(3)
     asyncio.create_task(_watch_loop())
-    yield
+    try:
+        yield
+    finally:
+        _vault.close()  # else the vault server keeps a process for it for an hour
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +132,9 @@ async def health(request):
     # session every 30s that was never closed.
     return PlainTextResponse("ok")
 
-_embedder = embedding_functions.DefaultEmbeddingFunction()
+_embedder = E5Embedder()
 _chroma: Optional[HttpClient] = None
+_bm25: dict[str, BM25] = {}  # collection -> keyword index, dropped on any write
 
 
 def get_chroma() -> HttpClient:
@@ -116,12 +144,44 @@ def get_chroma() -> HttpClient:
     return _chroma
 
 
+def _collection_meta(name: str) -> dict:
+    meta = {"hnsw:space": "cosine", "embed": MODEL_ID}
+    if name == COLLECTION_NAME:
+        meta["chunker"] = CHUNKER_VERSION
+    return meta
+
+
 def get_collection(name: str = COLLECTION_NAME):
     return get_chroma().get_or_create_collection(
         name=name,
         embedding_function=_embedder,
-        metadata={"hnsw:space": "cosine"},
+        metadata=_collection_meta(name),
     )
+
+
+def _migrate_collections():
+    """Rebuild collections made by another embedding model or chunker. The
+    vault index is recreated empty (the watcher re-chunks every note); any
+    other collection is re-embedded from its stored text and metadata."""
+    client = get_chroma()
+    for name in map(str, client.list_collections()):
+        col = client.get_collection(name)
+        want = _collection_meta(name)
+        have = col.metadata or {}
+        if all(have.get(k) == v for k, v in want.items() if k != "hnsw:space"):
+            continue
+        _log.warning("rebuilding collection %s (%s -> %s)", name,
+                     {k: have.get(k) for k in want}, want)
+        if name == COLLECTION_NAME:
+            client.delete_collection(name)
+            get_collection(name)
+            continue
+        got = col.get(include=["documents", "metadatas"])
+        client.delete_collection(name)
+        new = get_collection(name)
+        for i in range(0, len(got["ids"]), 256):
+            new.upsert(ids=got["ids"][i:i + 256], documents=got["documents"][i:i + 256],
+                       metadatas=[m or None for m in got["metadatas"][i:i + 256]])
 
 
 # ---------------------------------------------------------------------------
@@ -129,42 +189,31 @@ def get_collection(name: str = COLLECTION_NAME):
 # ---------------------------------------------------------------------------
 
 
-def _chunk(text: str) -> list[str]:
-    if len(text) <= CHUNK_SIZE:
-        return [text]
-    chunks, start = [], 0
-    while start < len(text):
-        chunks.append(text[start:start + CHUNK_SIZE])
-        start += CHUNK_SIZE - CHUNK_OVERLAP
-    return chunks
+def _chunk(text: str, path: str, title: str = "") -> list[dict]:
+    return chunk_note(text, path, _embedder.count_tokens, title=title,
+                      max_tokens=CHUNK_TOKENS, overlap_tokens=CHUNK_OVERLAP_TOKENS)
 
 
-def _sig(content: bytes) -> str:
-    return hashlib.md5(content).hexdigest()
+def _sig(note: dict) -> str:
+    raw = json.dumps([note["frontmatter"], note["content"]], sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _list_vault() -> list[str]:
-    """Vault-relative paths of all .md notes, skipping dot-dirs (.obsidian, .trash)."""
-    if not VAULT_DIR.is_dir():
-        raise RuntimeError(f"vault not mounted at {VAULT_DIR}")
-    return sorted(
-        str(p.relative_to(VAULT_DIR)) for p in VAULT_DIR.rglob("*.md")
-        if not any(part.startswith(".") for part in p.relative_to(VAULT_DIR).parts)
-    )
-
-
-def _index_note(collection, path: str, raw: bytes, sig: str) -> int:
-    """Replace a note's chunks in the index; returns the chunk count."""
+def _index_note(collection, path: str, note: dict, sig: str) -> int:
+    """Replace a note's chunks in the index; returns the chunk count.
+    `note` is {"content", "frontmatter"} as the vault server returns it."""
     existing = collection.get(where={"source": path}, limit=10000)
     if existing["ids"]:
         collection.delete(ids=existing["ids"])
-    chunks = _chunk(raw.decode("utf-8", errors="replace"))
+    title = note["frontmatter"].get("title") or ""
+    chunks = _chunk(note["content"], path, str(title))
     ids = [f"{path}::{i}" for i in range(len(chunks))]
     metadatas = [
-        {"source": path, "chunk": i, **({"sig": sig} if i == 0 else {})}
-        for i in range(len(chunks))
+        {"source": path, "chunk": i, "heading": c["heading"], **({"sig": sig} if i == 0 else {})}
+        for i, c in enumerate(chunks)
     ]
-    collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
+    collection.upsert(ids=ids, documents=[c["text"] for c in chunks], metadatas=metadatas)
+    _bm25.pop(collection.name, None)
     _vault_state[path] = sig
     return len(chunks)
 
@@ -185,12 +234,17 @@ async def _init_vault_state():
             _vault_state[source] = sig
 
 
-async def _sync_vault():
-    """Detect and apply vault changes to ChromaDB."""
+def _sync_vault():
+    """Detect and apply vault changes to ChromaDB. Blocking: embedding a
+    changed note takes seconds (a full re-index, minutes), so the watcher
+    runs it in a worker thread to keep the MCP server responsive."""
     try:
-        current_paths = set(_list_vault())
+        current_paths = set(_vault.list_notes())
+        mtimes = _vault.mtimes(sorted(current_paths))
     except Exception as e:
+        # Never treat an unreachable server as an empty vault
         _log.warning("vault sync skipped: %s", e)
+        _sync_status.update(last_error=f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {e}")
         return
 
     collection = get_collection()
@@ -201,34 +255,41 @@ async def _sync_vault():
             existing = collection.get(where={"source": path}, limit=10000)
             if existing["ids"]:
                 collection.delete(ids=existing["ids"])
+                _bm25.pop(collection.name, None)
             _vault_state.pop(path, None)
             _vault_mtime.pop(path, None)
             _log.info("removed: %s", path)
         except Exception as e:
             _log.warning("remove failed: %s: %s", path, e)
 
-    # New and modified files; an unchanged mtime skips reading the file at all
-    for path in current_paths:
+    # New and modified notes; an unchanged mtime skips reading the note at all
+    changed = sorted(p for p in current_paths
+                     if not (_vault_mtime.get(p) == mtimes.get(p) and p in _vault_state))
+    for i in range(0, len(changed), 10):
+        batch = changed[i:i + 10]
         try:
-            full = VAULT_DIR / path
-            mtime = full.stat().st_mtime
-            if _vault_mtime.get(path) == mtime and path in _vault_state:
-                continue
-            raw = full.read_bytes()
-            sig = _sig(raw)
-            _vault_mtime[path] = mtime
-            if _vault_state.get(path) == sig:
-                continue  # touched, content unchanged
-            n = _index_note(collection, path, raw, sig)
-            _log.info("re-indexed: %s (%d chunks)", path, n)
+            notes = _vault.read(batch)
         except Exception as e:
-            _log.warning("index failed: %s: %s", path, e)
+            _log.warning("vault read failed, retrying next tick: %s", e)
+            _sync_status.update(last_error=f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {e}")
+            return
+        for path, note in notes.items():
+            try:
+                sig = _sig(note)
+                _vault_mtime[path] = mtimes.get(path)
+                if _vault_state.get(path) == sig:
+                    continue  # touched, content unchanged
+                n = _index_note(collection, path, note, sig)
+                _log.info("re-indexed: %s (%d chunks)", path, n)
+            except Exception as e:
+                _log.warning("index failed: %s: %s", path, e)
+    _sync_status.update(last_ok=time.strftime("%Y-%m-%dT%H:%M:%S"), notes=len(current_paths))
 
 
 async def _watch_loop():
     while True:
         await asyncio.sleep(WATCH_INTERVAL)
-        await _sync_vault()
+        await asyncio.to_thread(_sync_vault)
 
 
 # ---------------------------------------------------------------------------
@@ -236,38 +297,81 @@ async def _watch_loop():
 # ---------------------------------------------------------------------------
 
 
+def _keyword_index(collection) -> BM25:
+    index = _bm25.get(collection.name)
+    if index is None:
+        got = collection.get(include=["documents"])
+        index = _bm25[collection.name] = BM25(got["ids"], got["documents"])
+    return index
+
+
+def _search(name: str, query: str, k: int, mode: str = "hybrid") -> list[dict]:
+    """Top-k hits as {id, metadata, score, text, match}.
+
+    Ranking: "vector" by embedding similarity, "keyword" by BM25, "hybrid"
+    (default) by reciprocal rank fusion of both lists, so a chunk found by
+    either can surface and one found by both ranks highest. Whatever the
+    ranking, `score` is the cosine similarity of query and chunk, so a
+    threshold on it (e.g. claude-maxer's paper dedup) means the same thing
+    in every mode.
+    """
+    if mode not in ("hybrid", "vector", "keyword"):
+        raise ValueError(f"mode must be hybrid, vector or keyword, not {mode!r}")
+    collection = get_collection(name)
+    total = collection.count()
+    if not total:
+        return []
+    q = _embedder.embed_query(query)
+    pool = min(max(k * 4, 20), total)
+
+    hits: dict[str, dict] = {}
+    rrf: dict[str, float] = {}
+    if mode != "keyword":
+        res = collection.query(query_embeddings=[q.tolist()], n_results=pool if mode == "hybrid" else min(k, total))
+        for rank, (i, m, d, dist) in enumerate(zip(res["ids"][0], res["metadatas"][0],
+                                                   res["documents"][0], res["distances"][0])):
+            hits[i] = {"id": i, "metadata": m or {}, "score": round(1 - dist, 4), "text": d, "match": "vector"}
+            rrf[i] = 1 / (RRF_K + rank + 1)
+    if mode != "vector":
+        weight = (EXACT_KEYWORD_WEIGHT
+                  if len(query.split()) <= 2 and EXACT_QUERY.search(query) else 1.0)
+        for rank, (i, _) in enumerate(_keyword_index(collection).search(query, pool)):
+            rrf[i] = rrf.get(i, 0) + weight / (RRF_K + rank + 1)
+            if i in hits:
+                hits[i]["match"] = "both"
+            else:
+                hits[i] = {"id": i, "match": "keyword"}
+
+    top = sorted(rrf, key=rrf.get, reverse=True)[:k]
+    missing = [i for i in top if "text" not in hits[i]]
+    if missing:  # keyword-only hits: fetch text and embedding to score them
+        got = collection.get(ids=missing, include=["documents", "metadatas", "embeddings"])
+        for i, d, m, e in zip(got["ids"], got["documents"], got["metadatas"], got["embeddings"]):
+            hits[i].update(metadata=m or {}, text=d, score=round(float(np.dot(q, e)), 4))
+    return [hits[i] for i in top if "text" in hits[i]]
+
+
 @mcp.tool()
-async def rag_search(query: str, k: int = 5, collection: str = COLLECTION_NAME) -> dict:
-    """Semantic search over stored documents.
+async def rag_search(query: str, k: int = 5, collection: str = COLLECTION_NAME,
+                     mode: str = "hybrid") -> dict:
+    """Semantic + keyword search over stored documents.
 
     Args:
-        query: Natural-language search query.
+        query: Natural-language search query (any language).
         k: Number of results to return (default 5).
         collection: Collection to search (default "documents", the vault index).
+        mode: "hybrid" (default: meaning and exact terms, fused), "vector"
+              (meaning only), or "keyword" (BM25 exact terms only, good for
+              file names, IDs and rare words).
 
-    Returns dict with 'results': list of {id, metadata, score, snippet}.
+    Returns dict with 'results': list of {id, metadata, score, snippet, match};
+    score is cosine similarity, match says which ranker found the hit.
     """
-    collection = get_collection(collection)
-    results = collection.query(query_texts=[query], n_results=k)
-
-    items = []
-    ids = results.get("ids", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    documents = results.get("documents", [[]])[0]
-    distances = results.get("distances", [[]])[0]
-
-    for i, doc_id in enumerate(ids):
-        meta = metadatas[i] if i < len(metadatas) else {}
-        snippet = documents[i][:300] if i < len(documents) else ""
-        score = 1 - distances[i] if i < len(distances) else 0.0
-        items.append({
-            "id": doc_id,
-            "metadata": meta,
-            "score": round(score, 4),
-            "snippet": snippet,
-        })
-
-    return {"results": items, "count": len(items)}
+    hits = await asyncio.to_thread(_search, collection, query, k, mode)
+    return {"results": [
+        {"id": h["id"], "metadata": h["metadata"], "score": h["score"],
+         "snippet": h["text"][:300], "match": h["match"]} for h in hits
+    ], "count": len(hits)}
 
 
 @mcp.tool()
@@ -303,7 +407,8 @@ async def rag_ingest(documents: list[dict], collection: str = COLLECTION_NAME) -
     if not ids:
         return {"ingested": 0, "errors": errors, "message": "No valid documents."}
 
-    collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
+    await asyncio.to_thread(collection.upsert, ids=ids, documents=texts, metadatas=metadatas)
+    _bm25.pop(collection.name, None)
     return {"ingested": len(ids), "errors": errors}
 
 
@@ -318,11 +423,14 @@ async def rag_status() -> dict:
         counts["error"] = str(e)
 
     return {
-        "model": "all-MiniLM-L6-v2 (ONNX)",
+        "model": f"{MODEL_ID} (ONNX)",
+        "search": "hybrid: vector + BM25, reciprocal rank fusion",
+        "chunking": f"{CHUNKER_VERSION}, <= {CHUNK_TOKENS} tokens",
         "collection": COLLECTION_NAME,
         "docs": counts.get(COLLECTION_NAME, 0),
         "collections": counts,
-        "vault_dir": str(VAULT_DIR),
+        "vault_source": VAULT_MCP_URL,
+        "vault_sync": dict(_sync_status),
         "watch_interval_seconds": WATCH_INTERVAL,
         "tracked_files": len(_vault_state),
     }
@@ -346,6 +454,7 @@ async def rag_remove(doc_id: str, collection: str = COLLECTION_NAME) -> dict:
     collection = get_collection(collection)
     try:
         collection.delete(ids=[doc_id])
+        _bm25.pop(collection.name, None)
         return {"removed": doc_id}
     except Exception as e:
         return {"removed": None, "error": str(e)}
@@ -361,20 +470,32 @@ async def rag_load(doc_id: Optional[str] = None) -> dict:
 
     Returns dict with 'ingested': chunk count and 'files': list of processed notes.
     """
-    paths = [doc_id] if doc_id is not None else _list_vault()
+    return await asyncio.to_thread(_load, doc_id)
+
+
+def _load(doc_id: Optional[str]) -> dict:
+    paths = [doc_id] if doc_id is not None else _vault.list_notes()
     collection = get_collection()
     total_chunks = 0
     processed = []
     errors = []
 
-    for path in paths:
+    for i in range(0, len(paths), 10):
+        batch = paths[i:i + 10]
         try:
-            raw = (VAULT_DIR / path).read_bytes()
-            n = _index_note(collection, path, raw, _sig(raw))
-            total_chunks += n
-            processed.append({"file": path, "chunks": n})
+            notes = _vault.read(batch)
         except Exception as e:
-            errors.append({"file": path, "error": str(e)})
+            errors += [{"file": p, "error": str(e)} for p in batch]
+            continue
+        errors += [{"file": p, "error": "not readable through the vault server"}
+                   for p in batch if p not in notes]
+        for path, note in notes.items():
+            try:
+                n = _index_note(collection, path, note, _sig(note))
+                total_chunks += n
+                processed.append({"file": path, "chunks": n})
+            except Exception as e:
+                errors.append({"file": path, "error": str(e)})
 
     return {"ingested": total_chunks, "files": processed, "errors": errors}
 
@@ -385,7 +506,9 @@ async def rag_clear() -> dict:
     client = get_chroma()
     count = client.get_collection(COLLECTION_NAME).count()
     client.delete_collection(COLLECTION_NAME)
+    _bm25.pop(COLLECTION_NAME, None)
     _vault_state.clear()
+    _vault_mtime.clear()
     return {"cleared": count}
 
 
@@ -402,25 +525,17 @@ async def rag_answer(query: str, k: int = 4) -> dict:
         - sources: Deduplicated list of source document names used.
         - chunks: The retrieved context passages with scores.
     """
-    collection = get_collection()
-    results = collection.query(query_texts=[query], n_results=k)
+    hits = await asyncio.to_thread(_search, COLLECTION_NAME, query, k)
 
-    ids = results.get("ids", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    documents = results.get("documents", [[]])[0]
-    distances = results.get("distances", [[]])[0]
-
-    if not ids:
+    if not hits:
         return {"answer": "No relevant documents found in the index.", "sources": [], "chunks": []}
 
     # Build numbered context block for the LLM
     context_parts = []
     chunks_info = []
-    for i, doc_id in enumerate(ids):
-        meta = metadatas[i] if i < len(metadatas) else {}
-        text = documents[i] if i < len(documents) else ""
-        score = round(1 - distances[i], 4) if i < len(distances) else 0.0
-        source = meta.get("source", doc_id)
+    for i, h in enumerate(hits):
+        doc_id, text, score = h["id"], h["text"], h["score"]
+        source = h["metadata"].get("source", doc_id)
         context_parts.append(f"[{i + 1}] (source: {source}, score: {score})\n{text}")
         chunks_info.append({"id": doc_id, "source": source, "score": score})
 

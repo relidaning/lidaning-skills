@@ -6,15 +6,19 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Embedding model (int8 ONNX export of intfloat/multilingual-e5-small, ~118MB),
+# baked into the image so startup needs no network.
+# http_proxy/https_proxy come in as build args from docker-compose.yml.
+ARG E5_REPO=Xenova/multilingual-e5-small
+RUN mkdir -p /models/multilingual-e5-small && cd /models/multilingual-e5-small && \
+    for f in onnx/model_quantized.onnx tokenizer.json config.json; do \
+      curl -fsSL --retry 3 -o "$(basename $f)" "https://huggingface.co/$E5_REPO/resolve/main/$f"; \
+    done
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download ONNX embedding model (~80MB) so first request doesn't time out
-# Soft-fail: if download times out, model is fetched on first container start instead
-COPY preload.py .
-RUN python preload.py || echo "Model preload skipped (will download at runtime)"
-
-COPY server.py .
+COPY server.py chunker.py bm25.py embedder.py vault_client.py ./
 
 EXPOSE 8081
 

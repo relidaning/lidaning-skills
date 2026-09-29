@@ -13,25 +13,29 @@ services:
     restart: unless-stopped
 
   rag-mcp:
-    build: ./rag-mcp
+    build:
+      context: ./rag-mcp
+      network: host  # the proxy listens on 127.0.0.1
+      args:
+        - http_proxy
+        - https_proxy
     network_mode: host
-    volumes:
-      - onnx-cache:/root/.cache/chroma
-      # The same folder the obsidian-vault-mcp container (obsidian-local/server)
-      # serves, under the same variable; read-only, the watcher only reads.
-      - ${OBSIDIAN_VAULT_PATH:-/data/nextcloud_client/obsidian/lidaning}:/vault:ro
     environment:
       - CHROMA_HOST=localhost
       - CHROMA_PORT=8000
-      - VAULT_DIR=/vault
+      # The vault is read through obsidian-local's obsidian-vault MCP server
+      # (host network, so localhost is the host), not from disk.
+      - VAULT_MCP_URL=http://127.0.0.1:27125/mcp
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_MODEL=${LLM_MODEL}
       - TZ=Asia/Shanghai
+      - EMBED_THREADS=8
+      # glibc: fewer malloc arenas and eager trimming, so memory freed after a
+      # re-index goes back to the OS instead of staying resident
+      - MALLOC_ARENA_MAX=2
+      - MALLOC_TRIM_THRESHOLD_=0
     depends_on:
       chromadb:
         condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  onnx-cache:

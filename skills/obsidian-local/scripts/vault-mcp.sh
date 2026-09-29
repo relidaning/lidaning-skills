@@ -34,6 +34,9 @@ session() {  # open an MCP session, print its id
 rpc() {  # rpc <method> <params-json>
   local sid; sid=$(session)
   post "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"$1\",\"params\":$2}" "$sid" | sed -n 's/^data: //p'
+  # Close the session: supergateway keeps a server process per open session
+  # for an hour, and one per call used to push the container to its 256MB limit.
+  curl -s --noproxy '*' -m 5 -X DELETE -H "mcp-session-id: $sid" "$BASE/mcp" >/dev/null || true
 }
 
 ensure() {

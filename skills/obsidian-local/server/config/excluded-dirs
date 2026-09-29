@@ -1,0 +1,8 @@
+# Vault folders this MCP server never exposes: not listed, searched, read or
+# written. One vault-relative folder per line; `#` starts a comment.
+# Re-read on change, no restart needed. rag-chroma's index honors it too.
+#
+# Matched by name: a renamed or moved folder is exposed again until this
+# list is updated. Both servers log a warning for a listed folder that
+# doesn't exist.
+0_lidaning
