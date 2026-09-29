@@ -17,11 +17,13 @@ services:
     network_mode: host
     volumes:
       - onnx-cache:/root/.cache/chroma
+      # The same folder the obsidian-vault-mcp container (obsidian-local/server)
+      # serves, under the same variable; read-only, the watcher only reads.
+      - ${OBSIDIAN_VAULT_PATH:-/data/nextcloud_client/obsidian/lidaning}:/vault:ro
     environment:
       - CHROMA_HOST=localhost
       - CHROMA_PORT=8000
-      - OBSIDIAN_URL=http://127.0.0.1:27123
-      - OBSIDIAN_TOKEN=${OBSIDIAN_MCP_TOKEN}
+      - VAULT_DIR=/vault
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_MODEL=${LLM_MODEL}

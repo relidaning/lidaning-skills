@@ -213,6 +213,19 @@ Order 2 once a day, then order 4.
 the caller adds output rules (numbered, linked items, no invented URLs).
 They rotate in order across runs. Add, remove or reword freely.
 
+A title ending in `(daily)` is pinned instead: it runs in every day's first
+batch, never as filler, so it produces exactly one section a day. Its
+prompt also gets the past 7 days' titles to skip, not just today's.
+
+Papers also has a memory: every paper it proposes is stored in rag-chroma's
+`papers` collection, listed in the next prompt as already covered, and a
+repeat that slips through anyway (same arXiv ID, or the same paper reworded
+or linked elsewhere) is dropped before the note is written. See
+claude-maxer's `maxer.py` (`PAPER_TASKS`).
+
+### Papers (daily)
+Find the 5 AI, machine learning and deep learning research papers most worth reading right now. Each must be either very important (a major lab's model or technique report, or a result the field is actively building on) or clearly trending in the last 7 days (high on Hugging Face Daily Papers, alphaXiv or arXiv trending, or widely discussed on X, Reddit or Hacker News). Prefer papers from the last 2 weeks; include an older paper only if it newly became important. At least one of the 5, listed last, must instead be a foundational paper of any year that shaped how AI, machine learning or deep learning developed (for example backpropagation, AlexNet, dropout, Adam, the Transformer, scaling laws); vary the era and area from day to day, and for it the "Chosen because" sentence names what later work it inspired. Link the arXiv abstract page (arxiv.org/abs/…) when there is one, otherwise the paper's official page. Use the first author's lab or the org as Source and the submission date as the date. The first sentence says what the paper does; the second starts with "Chosen because" and gives the reason with its evidence (e.g. upvote count, who released it, or who is discussing it).
+
 ### AI
 Find the 10 most important stories from the last 48 hours on AI and machine learning: model releases, research, AI companies, policy.
 

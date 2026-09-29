@@ -23,7 +23,12 @@ forever.
 
 Usage: fetch_usage_oauth.py [--no-write] [--raw] [--refresh]
 Exit codes: 0 = snapshot written (or data printed), 2 = auth problem
-(unreadable credentials / refresh rejected), 1 = anything else.
+(unreadable credentials / refresh rejected), 3 = rate-limited (HTTP 429, or
+still backing off from one), 1 = anything else.
+
+Cost: none. This is a metadata request, not a model call, so it uses no
+tokens and no 5h/7d quota. Cron runs it every 2 minutes; if the endpoint
+ever answers 429, later runs skip until its Retry-After (default 10 min).
 """
 
 import argparse
@@ -37,6 +42,8 @@ from datetime import datetime
 
 CREDENTIALS_PATH = os.path.expanduser("~/.claude/.credentials.json")
 SNAPSHOT_PATH = os.path.expanduser("~/.claude/state/usage_snapshot.json")
+BACKOFF_PATH = os.path.expanduser("~/.claude/state/usage_fetch_backoff.json")
+DEFAULT_BACKOFF_S = 600
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token"
 # Claude Code's public OAuth client id (same one the CLI itself sends).
@@ -111,6 +118,16 @@ def main():
     args = ap.parse_args()
 
     try:
+        with open(BACKOFF_PATH) as f:
+            until = json.load(f).get("until", 0)
+    except (OSError, ValueError):
+        until = 0
+    if time.time() < until:
+        print(f"SKIP: rate-limited, backing off until "
+              f"{datetime.fromtimestamp(until):%H:%M:%S}", file=sys.stderr)
+        return 3
+
+    try:
         with open(CREDENTIALS_PATH) as f:
             creds = json.load(f)
         token = creds.get("claudeAiOauth", {}).get("accessToken")
@@ -176,6 +193,16 @@ def main():
                 f"AUTH: HTTP {e.code} even after token refresh: {body}", file=sys.stderr
             )
             return 2
+        if e.code == 429:
+            try:
+                wait = int(e.headers.get("Retry-After") or DEFAULT_BACKOFF_S)
+            except ValueError:
+                wait = DEFAULT_BACKOFF_S
+            os.makedirs(os.path.dirname(BACKOFF_PATH), exist_ok=True)
+            with open(BACKOFF_PATH, "w") as f:
+                json.dump({"until": time.time() + wait}, f)
+            print(f"RATE-LIMITED: HTTP 429, backing off {wait}s: {body}", file=sys.stderr)
+            return 3
         print(f"ERROR: HTTP {e.code} from usage endpoint: {body}", file=sys.stderr)
         return 1
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as e:

@@ -160,8 +160,11 @@ def news_tasks(path=SKILL_PATH):
     if m:
         for block in re.split(r"^### ", m.group(1), flags=re.M)[1:]:
             title, _, body = block.partition("\n")
-            if title.strip() and body.strip():
-                tasks.append({"title": title.strip(), "prompt": body.strip()})
+            title, daily = title.strip(), False
+            if title.endswith("(daily)"):  # pinned into every day's first batch
+                title, daily = title[:-len("(daily)")].strip(), True
+            if title and body.strip():
+                tasks.append({"title": title, "prompt": body.strip(), "daily": daily})
     return tasks
 
 

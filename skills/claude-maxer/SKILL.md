@@ -25,7 +25,7 @@ reliably keep time.
 | cron                        | command | does                                                     |
 | --------------------------- | ------- | -------------------------------------------------------- |
 | `*/10 * * * *`              | `tick`  | decides from the real 5h reset time (below)              |
-| `*/15 * * * *`              | fetch   | refreshes the usage snapshot (costs no quota)            |
+| `*/2 * * * *`               | fetch   | refreshes the usage snapshot (costs no quota)            |
 
 The 5h window rolls: it opens on the first request after the last one
 expired, whoever sends it, so its reset isn't at a fixed hour. Fixed cron
@@ -96,6 +96,8 @@ news). The order, as the queue hands it out:
    entry to retry it; `run` passes those as `--skip`).
 2. **One news batch, if today hasn't had one yet** (`concurrency` news
    tasks in parallel; `run` reports it with `tasks_queue.py news-ran`).
+   News tasks marked `(daily)` in tasks-queue (e.g. Papers) lead this batch
+   every day and never run as filler.
 3. **An optimize task**: one app under `/data/apps`, delivered as a PR. It
    runs alone, in the app's directory, but edits only a fresh git worktree
    on a new `opt/<app>-<stamp>` branch, so your checkout is never touched.

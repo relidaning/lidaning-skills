@@ -58,7 +58,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILL_PATH = os.path.join(SKILL_DIR, "SKILL.md")
@@ -74,7 +74,7 @@ WORK_DIR = os.path.join(STATE_DIR, "claude-maxer-work")  # neutral cwd: no repo 
 RUN_LOCK = "/tmp/claude-maxer-run.lock"
 TICK_LOCK = "/tmp/claude-maxer-tick.lock"
 TICK_PATH = os.path.join(STATE_DIR, "claude-maxer-tick.json")  # window/pin a tick already handled
-# Shared with the */15 fetch cron: fetch_usage_oauth.py rotates a single-use
+# Shared with the */2 fetch cron: fetch_usage_oauth.py rotates a single-use
 # OAuth refresh token, so two fetchers must never overlap.
 FETCH_LOCK = "/tmp/claude-usage-fetch.lock"
 
@@ -108,6 +108,7 @@ TASKS = []  # [(slug, title, prompt)], loaded from SKILL.md
 # default, used only when the queue can't be read.
 QUEUE_SCRIPT = os.path.join(SKILL_DIR, "..", "tasks-queue", "tasks_queue.py")
 QUEUE_TIMEOUT_S = 90         # the vault container has hung before; never wait on it long
+DAILY_LOOKBACK_DAYS = 7     # a daily-pinned task skips titles from the past week, not just today
 VAULT_TASK_ROOT = "/data/apps"  # repos a vault task may target
 VAULT_FAILS_PATH = os.path.join(STATE_DIR, "claude-maxer-vault-fails.json")
 MAX_VAULT_ATTEMPTS = 2       # then skip that task until the user edits it
@@ -367,6 +368,8 @@ def gate(u, now):
 def next_tasks(n, tasks):
     """Round-robin through the news tasks across runs, by title, so
     editing the list doesn't reset or skip the rotation badly."""
+    if n < 1 or not tasks:
+        return []
     try:
         with open(ROTATION_PATH) as f:
             last = json.load(f).get("last")
@@ -393,17 +396,19 @@ def queue_call(*args):
 
 
 def news_source():
-    """(tasks, source): the queue's news tasks, or SKILL.md's defaults when
-    the queue can't be read or lists none."""
+    """(tasks, source, daily): the queue's news tasks, or SKILL.md's defaults
+    when the queue can't be read or lists none. `daily`: titles of tasks
+    pinned into each day's first batch and kept out of the rotation."""
     r = queue_call("news")
     if r and r[0] == 0:
         try:
-            tasks = [(slugify(t["title"]), t["title"], t["prompt"]) for t in json.loads(r[1])]
+            listed = json.loads(r[1])
+            tasks = [(slugify(t["title"]), t["title"], t["prompt"]) for t in listed]
             if tasks:
-                return tasks, "tasks-queue"
+                return tasks, "tasks-queue", {t["title"] for t in listed if t.get("daily")}
         except (ValueError, KeyError, TypeError):
             pass
-    return TASKS, "claude-maxer defaults"
+    return TASKS, "claude-maxer defaults", set()
 
 
 def read_fails():
@@ -605,13 +610,19 @@ def note_path(day):
     return f"claude-maxer/news/{day}.md"
 
 
-def covered_titles(path):
-    """Titles already in today's note, so a later task doesn't repeat them."""
-    try:
-        with open(os.path.join(VAULT_ROOT, path)) as f:
-            return re.findall(r"\*\*\[([^\]]+)\]\(", f.read())
-    except OSError:
-        return []
+def covered_titles(path, days=1):
+    """Titles already in today's note (and the `days - 1` notes before it),
+    so a later task doesn't repeat them."""
+    day = datetime.strptime(os.path.basename(path)[:-3], "%Y-%m-%d")
+    titles = []
+    for i in range(days):
+        p = note_path((day - timedelta(days=i)).strftime("%Y-%m-%d"))
+        try:
+            with open(os.path.join(VAULT_ROOT, p)) as f:
+                titles += re.findall(r"\*\*\[([^\]]+)\]\(", f.read())
+        except OSError:
+            pass
+    return titles
 
 
 _vault_lock = threading.Lock()  # parallel tasks append to the same daily note
@@ -709,10 +720,14 @@ def fmt_tokens(t):
             f"{n(t['cacheReadInputTokens'])} cache read, {n(t['outputTokens'])} out")
 
 
-def run_task(slug, title, prompt, day, deadline):
+def run_task(slug, title, prompt, day, deadline, lookback=1):
     path = note_path(day)
+    already = covered_titles(path, lookback)
+    seen = papers_seen() if title in PAPER_TASKS else None
+    if seen:
+        already += papers_already(seen)
     cmd = [
-        "claude", "-p", build_prompt(prompt, covered_titles(path)),
+        "claude", "-p", build_prompt(prompt, already),
         "--model", CFG["model"],
         "--output-format", "json",
         "--max-budget-usd", CFG["budget_usd"],
@@ -745,14 +760,120 @@ def run_task(slug, title, prompt, day, deadline):
     if out.get("is_error") or not entries:
         res["error"] = (out.get("subtype") or "no linked entries in reply")[:120]
         return res
+    body, docs = list_only(text), []
+    if seen is not None:
+        body, repeats, docs = filter_papers(body, day, seen)
+        if repeats:
+            log("papers_repeat", titles=repeats)
+        if not ENTRY.findall(body):
+            res["error"] = f"all {len(repeats)} papers were already proposed"
+            return res
     heading = f"# News — {day}\n\nCollected by claude-maxer, one section per task.\n"
     try:
-        vault_append(path, f"\n## {hm(started)} · {title}\n\n{list_only(text)}\n", heading=heading)
+        vault_append(path, f"\n## {hm(started)} · {title}\n\n{body}\n", heading=heading)
     except Exception as e:
         res["error"] = f"vault write failed: {e}"[:120]
         return res
-    res["items"] = len(entries)
+    if docs:
+        store_papers(docs)
+    res["items"] = len(ENTRY.findall(body))
     return res
+
+
+# ── paper memory ───────────────────────────────────────────────────────────
+# Every paper the Papers task proposes is stored in rag-chroma's "papers"
+# collection. Before a run, the prompt lists them all as already covered;
+# after it, a paper that slipped through anyway (same arXiv ID or URL, or the
+# same paper reworded / linked elsewhere) is dropped before the note is
+# written. Best-effort: with rag-mcp down, the 7-day title lookback still
+# applies and nothing is stored.
+
+sys.path.insert(0, os.path.join(SKILL_DIR, "..", "rag-chroma", "scripts"))
+PAPER_TASKS = {"Papers"}  # news task titles that get the paper memory
+PAPERS_COLLECTION = "papers"
+# Calibrated 2026-09-29 on two runs: the same paper reworded scored 0.77–0.86,
+# different papers at most 0.42.
+PAPER_DUP_SCORE = 0.65
+PAPER_PROMPT_MAX = 400  # newest papers listed in the prompt as already covered
+ARXIV_ID = re.compile(r"(?:arxiv\.org|alphaxiv\.org|huggingface\.co)/(?:abs/|pdf/|papers/)?"
+                      r"(\d{4}\.\d{4,5})")
+ENTRY_PARTS = re.compile(r"\s*\d+\.\s+\*\*\[(.+?)\]\((https?://[^)\s]+)\)\*\*"
+                         r"\s*·\s*(.*?)\s*·\s*(\S+)[ \t]*\n?(.*)", re.S)
+
+
+def paper_id(url):
+    """arXiv ID when the link has one, so arxiv/alphaxiv/HF links match;
+    otherwise the URL without scheme, www, query or trailing slash."""
+    m = ARXIV_ID.search(url)
+    if m:
+        return f"arxiv:{m.group(1)}"
+    return re.sub(r"^https?://(www\.)?|[?#].*$", "", url).rstrip("/")
+
+
+def rag(tool, args):
+    from rag_mcp import call
+    return call(tool, args)
+
+
+def papers_seen():
+    """{id: metadata} of every paper proposed so far, or None if rag-mcp is down."""
+    try:
+        items = rag("rag_list", {"collection": PAPERS_COLLECTION, "limit": 100000})["items"]
+        return {i["id"]: i["metadata"] or {} for i in items}
+    except Exception as e:
+        log("papers_memory", error=str(e)[:200])
+        return None
+
+
+def papers_already(seen):
+    newest = sorted(seen.items(), key=lambda kv: kv[1].get("proposed", ""), reverse=True)
+    return [f"{m.get('title', pid)} ({pid})" for pid, m in newest[:PAPER_PROMPT_MAX]]
+
+
+def filter_papers(body, day, seen):
+    """(body, repeats, docs): the entries not proposed before, renumbered;
+    the titles dropped as repeats; and the new papers to store once the
+    note is written."""
+    blocks = re.split(r"\n(?=\s*\d+\.\s)", body)
+    kept, repeats, docs = [], [], []
+    for block in blocks:
+        m = ENTRY_PARTS.match(block)
+        if not m:
+            kept.append(block)
+            continue
+        title, url, source, date, rest = m.groups()
+        pid = paper_id(url)
+        content = f"{title}. {' '.join(rest.split())}"
+        if pid in seen or any(d["id"] == pid for d in docs):
+            repeats.append(title)
+            continue
+        if seen:
+            try:
+                hit = rag("rag_search", {"query": content, "k": 1,
+                                         "collection": PAPERS_COLLECTION})["results"]
+            except Exception:
+                hit = []
+            if hit and hit[0]["score"] >= PAPER_DUP_SCORE:
+                repeats.append(f"{title} (≈ {hit[0]['metadata'].get('title', hit[0]['id'])})")
+                continue
+        kept.append(block)
+        recent = date[:4].isdigit() and int(date[:4]) >= int(day[:4]) - 1
+        docs.append({"id": pid, "content": content, "metadata": {
+            "title": title, "url": url, "source": source, "date": date, "proposed": day,
+            "kind": "recent" if recent else "foundational"}})
+    n = 0
+    for i, block in enumerate(kept):
+        if re.match(r"\s*\d+\.\s", block):
+            n += 1
+            kept[i] = re.sub(r"^(\s*)\d+\.", rf"\g<1>{n}.", block, count=1)
+    return "\n".join(kept).strip(), repeats, docs
+
+
+def store_papers(docs):
+    try:
+        rag("rag_ingest", {"documents": docs, "collection": PAPERS_COLLECTION})
+    except Exception as e:
+        log("papers_memory", error=f"store failed: {e}"[:200])
 
 
 # ── commands ───────────────────────────────────────────────────────────────
@@ -778,7 +899,7 @@ def cmd_run(dry_run):
         print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
               f"7d {u['seven_pct']}% (today's ceiling {day_budget(u, time.time(), False)['ceiling']}%)")
         task = next_work(sorted(k for k, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS))
-        news, src = news_source()
+        news, src, _ = news_source()
         print("queue's next task:", describe(task))
         print(f"news tasks ({src}):", [t[1] for t in news])
         if task and task["kind"] == "vault":
@@ -808,7 +929,9 @@ def cmd_run(dry_run):
     total_cost, tasks_done = 0.0, 0
     total_tokens = dict.fromkeys(TOKEN_KEYS, 0)
     tried = set()
-    news, src = news_source()
+    news, src, daily = news_source()
+    pinned = [t for t in news if t[1] in daily]
+    rotating = [t for t in news if t[1] not in daily] or news
     vault_append(note, f"- news tasks from {src}\n")
     while True:
         ok, why = gate(u, time.time())
@@ -846,10 +969,14 @@ def cmd_run(dry_run):
             if n < 1:
                 why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
                 break
-            batch = next_tasks(n, news)
+            # Daily-pinned tasks lead the day's first batch and never rotate.
+            first = pinned[:n] if task.get("why") == "daily" else []
+            batch = first + next_tasks(n - len(first), rotating)
             queue_call("news-ran")
             with ThreadPoolExecutor(max_workers=len(batch)) as ex:
-                results = list(ex.map(lambda t: run_task(*t, day, deadline), batch))
+                results = list(ex.map(lambda t: run_task(
+                    *t, day, deadline, lookback=DAILY_LOOKBACK_DAYS if t in pinned else 1),
+                    batch))
             u = fresh_usage()
             delta = (u["five_pct"] or 0) - before
             if delta > 0:
@@ -968,7 +1095,7 @@ def cmd_tick():
             json.dump(st, f)
 
     now = time.time()
-    u = read_usage()  # the */15 fetch keeps it fresh; open/run refresh again anyway
+    u = read_usage()  # the */2 fetch keeps it fresh; open/run refresh again anyway
     if u["age"] > 10 * 60:
         u = fresh_usage()
     if window_open(u, now):
@@ -999,10 +1126,11 @@ def cmd_status():
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
           f"  | 7d {u['seven_pct']}%  today's budget {b['budget']}pp "
           f"(from {b['seven_start']}% → ceiling {b['ceiling']}%, {b['days_left']} days left)")
-    news, src = news_source()
+    news, src, daily = news_source()
     task = next_work(sorted(k for k, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS))
     print(f"queue's next task: {describe(task)}")
-    print(f"news tasks from {src}: {', '.join(t[1] for t in news)}")
+    print(f"news tasks from {src}: "
+          f"{', '.join(t[1] + (' (daily)' if t[1] in daily else '') for t in news)}")
     print(f"settings: {CFG}")
     print("run would start tasks now" if ok else f"run would skip: {why}")
     if window_open(u, now):

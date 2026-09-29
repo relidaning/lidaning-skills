@@ -2,14 +2,19 @@
 
 MCP server that embeds text content via ChromaDB's built-in ONNX embedding
 function (all-MiniLM-L6-v2, no torch needed), stores in ChromaDB, and exposes
-search/ingest/load tools. Watches the Obsidian vault for changes and keeps
-the index in sync automatically.
+search/ingest/load tools. Watches the Obsidian vault folder on disk for
+changes and keeps the index in sync automatically.
+
+The vault is read from a read-only bind mount (VAULT_DIR), not the Obsidian
+app's REST API: the app isn't kept running, and when it stopped on
+2026-09-26 the watcher silently froze the index for days.
 """
 
 import asyncio
 import hashlib
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -23,11 +28,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _log = logging.getLogger(__name__)
 
-import httpx
 from chromadb import HttpClient
 from chromadb.utils import embedding_functions
 from fastmcp import FastMCP
 from openai import AsyncOpenAI
+from starlette.responses import PlainTextResponse
 
 # ---------------------------------------------------------------------------
 # Config
@@ -36,11 +41,10 @@ from openai import AsyncOpenAI
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = os.getenv("CHROMA_PORT", "8000")
 
-OBSIDIAN_URL = os.getenv("OBSIDIAN_URL", "http://127.0.0.1:27123").rstrip("/")
-OBSIDIAN_TOKEN = os.getenv("OBSIDIAN_TOKEN", "")
+VAULT_DIR = Path(os.getenv("VAULT_DIR", "/vault"))
 WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL", "60"))
 
-COLLECTION_NAME = "documents"
+COLLECTION_NAME = "documents"  # the vault index; other collections are opt-in
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
@@ -73,6 +77,7 @@ After your answer include a "Sources:" line listing the document names you drew 
 # ---------------------------------------------------------------------------
 
 _vault_state: dict[str, str] = {}  # path -> content md5
+_vault_mtime: dict[str, float] = {}  # path -> mtime at last check, to skip re-hashing
 
 
 @asynccontextmanager
@@ -93,6 +98,13 @@ async def lifespan(server: FastMCP):
 
 mcp = FastMCP("rag", lifespan=lifespan)
 
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request):
+    # The Docker healthcheck used to GET /mcp, which opened a new MCP
+    # session every 30s that was never closed.
+    return PlainTextResponse("ok")
+
 _embedder = embedding_functions.DefaultEmbeddingFunction()
 _chroma: Optional[HttpClient] = None
 
@@ -104,9 +116,9 @@ def get_chroma() -> HttpClient:
     return _chroma
 
 
-def get_collection():
+def get_collection(name: str = COLLECTION_NAME):
     return get_chroma().get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=name,
         embedding_function=_embedder,
         metadata={"hnsw:space": "cosine"},
     )
@@ -127,27 +139,34 @@ def _chunk(text: str) -> list[str]:
     return chunks
 
 
-def _obsidian_headers() -> dict:
-    return {"Authorization": f"Bearer {OBSIDIAN_TOKEN}"}
-
-
 def _sig(content: bytes) -> str:
     return hashlib.md5(content).hexdigest()
 
 
-async def _list_vault_recursive(client: httpx.AsyncClient, prefix: str = "") -> list[str]:
-    """Recursively list all .md files under a vault path."""
-    resp = await client.get(f"{OBSIDIAN_URL}/vault/{prefix}", headers=_obsidian_headers())
-    resp.raise_for_status()
-    entries = resp.json().get("files", [])
-    paths = []
-    for entry in entries:
-        full = f"{prefix}{entry}"
-        if entry.endswith("/"):
-            paths.extend(await _list_vault_recursive(client, full))
-        elif entry.endswith(".md"):
-            paths.append(full)
-    return paths
+def _list_vault() -> list[str]:
+    """Vault-relative paths of all .md notes, skipping dot-dirs (.obsidian, .trash)."""
+    if not VAULT_DIR.is_dir():
+        raise RuntimeError(f"vault not mounted at {VAULT_DIR}")
+    return sorted(
+        str(p.relative_to(VAULT_DIR)) for p in VAULT_DIR.rglob("*.md")
+        if not any(part.startswith(".") for part in p.relative_to(VAULT_DIR).parts)
+    )
+
+
+def _index_note(collection, path: str, raw: bytes, sig: str) -> int:
+    """Replace a note's chunks in the index; returns the chunk count."""
+    existing = collection.get(where={"source": path}, limit=10000)
+    if existing["ids"]:
+        collection.delete(ids=existing["ids"])
+    chunks = _chunk(raw.decode("utf-8", errors="replace"))
+    ids = [f"{path}::{i}" for i in range(len(chunks))]
+    metadatas = [
+        {"source": path, "chunk": i, **({"sig": sig} if i == 0 else {})}
+        for i in range(len(chunks))
+    ]
+    collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
+    _vault_state[path] = sig
+    return len(chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -168,58 +187,42 @@ async def _init_vault_state():
 
 async def _sync_vault():
     """Detect and apply vault changes to ChromaDB."""
-    async with httpx.AsyncClient(verify=False, timeout=60) as client:
+    try:
+        current_paths = set(_list_vault())
+    except Exception as e:
+        _log.warning("vault sync skipped: %s", e)
+        return
+
+    collection = get_collection()
+
+    # Deleted files — remove all their chunks
+    for path in set(_vault_state) - current_paths:
         try:
-            current_paths = set(await _list_vault_recursive(client))
-        except Exception:
-            return
+            existing = collection.get(where={"source": path}, limit=10000)
+            if existing["ids"]:
+                collection.delete(ids=existing["ids"])
+            _vault_state.pop(path, None)
+            _vault_mtime.pop(path, None)
+            _log.info("removed: %s", path)
+        except Exception as e:
+            _log.warning("remove failed: %s: %s", path, e)
 
-        prev_paths = set(_vault_state.keys())
-        collection = get_collection()
-
-        # Deleted files — remove all their chunks
-        for path in prev_paths - current_paths:
-            try:
-                existing = collection.get(where={"source": path}, limit=10000)
-                if existing["ids"]:
-                    collection.delete(ids=existing["ids"])
-                _vault_state.pop(path, None)
-            except Exception:
-                pass
-
-        # New and modified files
-        for path in current_paths:
-            try:
-                resp = await client.get(
-                    f"{OBSIDIAN_URL}/vault/{path}",
-                    headers={**_obsidian_headers(), "Accept": "text/markdown"},
-                )
-                resp.raise_for_status()
-                sig = _sig(resp.content)
-
-                if _vault_state.get(path) == sig:
-                    continue  # unchanged
-
-                content = resp.text
-
-                # Remove stale chunks before re-indexing a modified file
-                if path in _vault_state:
-                    existing = collection.get(where={"source": path}, limit=10000)
-                    if existing["ids"]:
-                        collection.delete(ids=existing["ids"])
-
-                chunks = _chunk(content)
-                ids = [f"{path}::{i}" for i in range(len(chunks))]
-                metadatas = [
-                    {"source": path, "chunk": i, **({"sig": sig} if i == 0 else {})}
-                    for i in range(len(chunks))
-                ]
-                collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
-                _vault_state[path] = sig
-                _log.info("re-indexed: %s (%d chunks)", path, len(chunks))
-
-            except Exception:
+    # New and modified files; an unchanged mtime skips reading the file at all
+    for path in current_paths:
+        try:
+            full = VAULT_DIR / path
+            mtime = full.stat().st_mtime
+            if _vault_mtime.get(path) == mtime and path in _vault_state:
                 continue
+            raw = full.read_bytes()
+            sig = _sig(raw)
+            _vault_mtime[path] = mtime
+            if _vault_state.get(path) == sig:
+                continue  # touched, content unchanged
+            n = _index_note(collection, path, raw, sig)
+            _log.info("re-indexed: %s (%d chunks)", path, n)
+        except Exception as e:
+            _log.warning("index failed: %s: %s", path, e)
 
 
 async def _watch_loop():
@@ -234,16 +237,17 @@ async def _watch_loop():
 
 
 @mcp.tool()
-async def rag_search(query: str, k: int = 5) -> dict:
+async def rag_search(query: str, k: int = 5, collection: str = COLLECTION_NAME) -> dict:
     """Semantic search over stored documents.
 
     Args:
         query: Natural-language search query.
         k: Number of results to return (default 5).
+        collection: Collection to search (default "documents", the vault index).
 
     Returns dict with 'results': list of {id, metadata, score, snippet}.
     """
-    collection = get_collection()
+    collection = get_collection(collection)
     results = collection.query(query_texts=[query], n_results=k)
 
     items = []
@@ -267,17 +271,19 @@ async def rag_search(query: str, k: int = 5) -> dict:
 
 
 @mcp.tool()
-async def rag_ingest(documents: list[dict]) -> dict:
+async def rag_ingest(documents: list[dict], collection: str = COLLECTION_NAME) -> dict:
     """Embed and store documents in ChromaDB.
 
     Args:
         documents: List of {id, content, metadata}. Each entry must have a
                    unique 'id' (str), 'content' (str), and optional 'metadata'
                    (dict of arbitrary key-value pairs).
+        collection: Target collection (default "documents"). Use a separate
+                    collection for data that isn't vault notes, e.g. "papers".
 
     Returns dict with 'ingested': count and 'errors': list of failures.
     """
-    collection = get_collection()
+    collection = get_collection(collection)
 
     ids, texts, metadatas, errors = [], [], [], []
 
@@ -303,26 +309,41 @@ async def rag_ingest(documents: list[dict]) -> dict:
 
 @mcp.tool()
 async def rag_status() -> dict:
-    """Show index statistics: model, doc count, watcher state."""
+    """Show index statistics: model, doc count per collection, watcher state."""
+    counts = {}
     try:
-        collection = get_collection()
-        count = collection.count()
-    except Exception:
-        count = 0
+        for name in get_chroma().list_collections():
+            counts[str(name)] = get_chroma().get_collection(str(name)).count()
+    except Exception as e:
+        counts["error"] = str(e)
 
     return {
         "model": "all-MiniLM-L6-v2 (ONNX)",
         "collection": COLLECTION_NAME,
-        "docs": count,
+        "docs": counts.get(COLLECTION_NAME, 0),
+        "collections": counts,
+        "vault_dir": str(VAULT_DIR),
         "watch_interval_seconds": WATCH_INTERVAL,
         "tracked_files": len(_vault_state),
     }
 
 
 @mcp.tool()
-async def rag_remove(doc_id: str) -> dict:
+async def rag_list(collection: str, limit: int = 1000) -> dict:
+    """List a collection's entries (id + metadata, no content), e.g. every
+    paper in "papers". Not meant for the vault index, which is large.
+
+    Returns dict with 'items': list of {id, metadata} and 'count'.
+    """
+    got = get_collection(collection).get(include=["metadatas"], limit=limit)
+    items = [{"id": i, "metadata": m} for i, m in zip(got["ids"], got["metadatas"])]
+    return {"items": items, "count": len(items)}
+
+
+@mcp.tool()
+async def rag_remove(doc_id: str, collection: str = COLLECTION_NAME) -> dict:
     """Remove a document from the index by its ID."""
-    collection = get_collection()
+    collection = get_collection(collection)
     try:
         collection.delete(ids=[doc_id])
         return {"removed": doc_id}
@@ -340,36 +361,20 @@ async def rag_load(doc_id: Optional[str] = None) -> dict:
 
     Returns dict with 'ingested': chunk count and 'files': list of processed notes.
     """
-    async with httpx.AsyncClient(verify=False, timeout=30) as client:
-        paths = [doc_id] if doc_id is not None else await _list_vault_recursive(client)
-
+    paths = [doc_id] if doc_id is not None else _list_vault()
     collection = get_collection()
     total_chunks = 0
     processed = []
     errors = []
 
-    async with httpx.AsyncClient(verify=False, timeout=30) as client:
-        for path in paths:
-            try:
-                resp = await client.get(
-                    f"{OBSIDIAN_URL}/vault/{path}",
-                    headers={**_obsidian_headers(), "Accept": "text/markdown"},
-                )
-                resp.raise_for_status()
-                sig = _sig(resp.content)
-                content = resp.text
-                chunks = _chunk(content)
-                ids = [f"{path}::{i}" for i in range(len(chunks))]
-                metadatas = [
-                    {"source": path, "chunk": i, **({"sig": sig} if i == 0 else {})}
-                    for i in range(len(chunks))
-                ]
-                collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
-                _vault_state[path] = sig
-                total_chunks += len(chunks)
-                processed.append({"file": path, "chunks": len(chunks)})
-            except Exception as e:
-                errors.append({"file": path, "error": str(e)})
+    for path in paths:
+        try:
+            raw = (VAULT_DIR / path).read_bytes()
+            n = _index_note(collection, path, raw, _sig(raw))
+            total_chunks += n
+            processed.append({"file": path, "chunks": n})
+        except Exception as e:
+            errors.append({"file": path, "error": str(e)})
 
     return {"ingested": total_chunks, "files": processed, "errors": errors}
 
