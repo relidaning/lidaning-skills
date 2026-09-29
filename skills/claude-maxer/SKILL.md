@@ -8,6 +8,7 @@ description: >
   are the defaults, run only when no task queue is available.
   Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer,
   or to ignore / respect the weekly (7d) limit.
+argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [status]"
 ---
 
 # Claude-maxer
@@ -19,6 +20,27 @@ changes what runs next time, with no code change and no reinstall. The timing
 and safety mechanics (reading usage, never opening an off-schedule window,
 stopping tasks before a reset) are in `maxer.py`, because a model can't
 reliably keep time.
+
+## Arguments (`/claude-maxer <args>`)
+
+When the skill is invoked with arguments, they are a command: run the
+matching line below from this skill's directory, show its output, and do
+nothing else (no task work, no script checks). `--until T` passes through
+unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
+
+| arguments | runs |
+|---|---|
+| `scheduler off [--until T]` | `./run_maxer_work.sh off [--until T]` |
+| `scheduler on` | `./run_maxer_work.sh on` |
+| `weekly off [--until T]` | `./run_maxer_work.sh weekly off [--until T]` (ignore the 7d budget) |
+| `weekly on` | `./run_maxer_work.sh weekly on` (respect it again) |
+| `status` | `./run_maxer_work.sh status` |
+
+Both switches can be combined in one call, e.g.
+`/claude-maxer scheduler on weekly off`. After `scheduler off`, say whether a
+task is still running (`pgrep -af 'claude -p'`): the switch stops new tasks,
+not one already in progress. Anything else is not a command: treat it as a
+normal request. With no arguments, the skill works as described below.
 
 ## Schedule (crontab, machine-local CST)
 
