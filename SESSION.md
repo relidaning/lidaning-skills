@@ -1,4 +1,6 @@
 # Sessions
+## 2026-09-30 — Q&A: "why didn't you answer yesterday"; english-practice fired (`aeb7b776`)
+A one-turn chat session: the user's message was one of their english-practice probe prompts (T2, pasted along with the rest of the T1–T4/H1–H2 list), and the skill fired and corrected "Why you didn't" → "Why didn't you". The assistant explained it has no record of yesterday's question and offered to benchmark the probe list via `skill-bench`; no reply, no changes.
 ## 2026-09-30 — Q&A: installed skills; english-practice left CLAUDE.md cleanly (`741a0dde`)
 A chat-only session: the assistant listed the 13 registered skills by install scope (via `install.sh --installed`), explained that a correct-but-lowercase message gets no correction block by design, and confirmed neither CLAUDE.md still carries the english-practice call rule — the skill fired on every turn from its description alone. It flagged one stale line (the claude-maxer `--tools ""` ping note blaming "the global english-practice CLAUDE.md rule") and offered a fix the user didn't answer; the session-log pass reworded it.
 ## 2026-09-30 — OpenCode support in install.sh/ldn; english-practice trigger rule moves into the skill (`e7ce365c`)
