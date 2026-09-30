@@ -1,4 +1,6 @@
 # Sessions
+## 2026-09-30 — Headless Q&A: Docker volumes (`570f0f25`)
+A single-prompt `sdk-cli` run on Opus 5.5: the prompt was "Can you explain what a Docker volume is?" followed by a tab-separated list of labelled test prompts (T1–T4, H1–H2, grammar-error cases that look like an english-practice suite). `Skill(english-practice)` fired first from its description alone. The reply answered only the Docker question (named volumes vs bind mounts vs tmpfs, Compose `down -v`, the root-owned bind-mount gotcha from `skills/douyin-follows/data/`), and it left the pasted T/H lines uncorrected as not the user's own prose. No files changed.
 ## 2026-09-30 — Q&A: "send me the report today" with pasted probe prompts (`59a80b16`)
 A one-turn chat session on Opus 5.5, no changes: `english-practice` fired and corrected "want you send" → "want you to send", the assistant said no report exists to send, and it walked through the expected skill behavior for each pasted probe (T1–T4, H1, H2). It flagged H1 (a grammatical but rude draft email to a professor) as a gap: the skill corrects only grammar and word choice, so tone problems in text written for someone else get no feedback. It offered to add a tone rule or turn the six prompts into a `skill-bench` suite; the user didn't answer.
 ## 2026-09-30 — Q&A: tone of an email to a professor, with pasted test prompts (`dd8c9fbb`)
