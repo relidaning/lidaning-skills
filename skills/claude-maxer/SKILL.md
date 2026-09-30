@@ -8,7 +8,7 @@ description: >
   are the defaults, run only when no task queue is available.
   Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer,
   or to ignore / respect the weekly (7d) limit.
-argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [status]"
+argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [show] [status]"
 ---
 
 # Claude-maxer
@@ -24,8 +24,11 @@ reliably keep time.
 ## Arguments (`/claude-maxer <args>`)
 
 When the skill is invoked with arguments, they are a command: run the
-matching line below from this skill's directory, show its output, and do
-nothing else (no task work, no script checks). `--until T` passes through
+matching line below in **one** Bash call, with the script's absolute path
+(`/data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh <args>`;
+the installed skill directory has only the `.md` files, not the scripts),
+show its output, and do nothing else (no task work, no script checks, no
+other skill calls). `--until T` passes through
 unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
 
 | arguments | runs |
@@ -34,7 +37,8 @@ unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
 | `scheduler on` | `./run_maxer_work.sh on` |
 | `weekly off [--until T]` | `./run_maxer_work.sh weekly off [--until T]` (ignore the 7d budget) |
 | `weekly on` | `./run_maxer_work.sh weekly on` (respect it again) |
-| `status` | `./run_maxer_work.sh status` |
+| `show` | `./run_maxer_work.sh show` (current settings: scheduler and weekly switches, cron block, Settings values; offline) |
+| `status` | `./run_maxer_work.sh status` (settings plus live usage, budget and the queue's next task) |
 
 Both switches can be combined in one call, e.g.
 `/claude-maxer scheduler on weekly off`. After `scheduler off`, say whether a
@@ -150,7 +154,7 @@ Find the 10 most important stories from the last 48 hours on AI and machine lear
 Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation.
 
 ### World
-Find the 10 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
+Find the 2 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
 
 ### Security
 Find the 10 most important cybersecurity stories from the last 48 hours: major breaches, actively exploited vulnerabilities, security research.

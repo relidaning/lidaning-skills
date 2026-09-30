@@ -233,7 +233,7 @@ Find the 10 most important stories from the last 48 hours on AI and machine lear
 Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation.
 
 ### World
-Find the 10 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
+Find the 2 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
 
 ### Security
 Find the 10 most important cybersecurity stories from the last 48 hours: major breaches, actively exploited vulnerabilities, security research.

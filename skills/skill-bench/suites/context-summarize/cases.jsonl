@@ -11,7 +11,7 @@
 {"id": "cs-t-011", "split": "test", "type": "trigger", "label": "positive", "category": "noisy", "claim": "T1", "prompt": "sumarize the readme pls", "rationale": "typo'd summarize"}
 {"id": "cs-t-012", "split": "dev", "type": "trigger", "label": "positive", "category": "noisy", "claim": "T2", "prompt": "tldr skills/vault-tasks/SKILL.md plz", "rationale": "'tldr' without punctuation"}
 {"id": "cs-t-013", "split": "test", "type": "trigger", "label": "positive", "category": "embedded", "claim": "T1", "prompt": "i'll ask about the db choice after, but first condense {fixtures}/meeting.md for me", "rationale": "condense request inside a longer message"}
-{"id": "cs-t-014", "split": "test", "type": "trigger", "label": "negative", "category": "other-skill", "claim": "N1", "prompt": "wrap up this session and update SESSION.md", "rationale": "coding-orchestrate owns SESSION.md"}
+{"id": "cs-t-014", "split": "test", "type": "trigger", "label": "negative", "category": "other-skill", "claim": "N1", "prompt": "wrap up this session and update SESSION.md", "rationale": "memory-orchestrate owns SESSION.md"}
 {"id": "cs-t-015", "split": "test", "type": "trigger", "label": "negative", "category": "other-skill", "claim": "N3", "prompt": "search my obsidian vault for notes about chromadb", "rationale": "obsidian-local search, not summary"}
 {"id": "cs-t-016", "split": "dev", "type": "trigger", "label": "negative", "category": "other-skill", "claim": "N3", "prompt": "find me papers on speculative decoding", "rationale": "paper-fetch search, nothing to summarize yet"}
 {"id": "cs-t-017", "split": "test", "type": "trigger", "label": "negative", "category": "other-skill", "claim": "N3", "prompt": "route claude code through deepseek", "rationale": "model-switch"}

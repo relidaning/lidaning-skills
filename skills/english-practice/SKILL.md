@@ -1,6 +1,6 @@
 ---
 name: english-practice
-description: 'Call this skill on every user message, on every turn, before writing any part of your reply — including messages already in fluent English and messages written in another language. Calling it is never redundant with answering in English yourself: the skill body holds the exact required reply format (an "=== English Practice ===" block with fixed emoji markers) that you cannot reproduce from memory, so replying without calling it first produces the wrong output format and is an error.'
+description: 'Call this skill on every user message, on every turn, before any other tool call and before writing any part of your reply — including messages already in fluent English and messages written in another language, and even when this skill is already loaded from an earlier turn. Calling it is never redundant with answering in English yourself, and complying from memory does not count: the skill body holds the exact required reply format (an "=== English Practice ===" block with fixed emoji markers) that you cannot reproduce from memory, so a reply written without calling it first is malformed even if it is in English. Only exception: skip it on a slash-command turn (`/<skill> [args]`, e.g. `/claude-maxer show`), which has no user prose to check.'
 ---
 
 ## Primary rule: always respond in English
@@ -34,7 +34,7 @@ Then give your actual response to the user's question.
 
 **When their English is already correct and natural — or the message was not in English at all** — emit nothing from this section: no block, no empty placeholder, and no sentence telling the user there was nothing to correct. Go straight to the answer.
 
-This applies to every turn, not just the first one. Keep checking each new message even after this skill is already loaded in your context.
+This applies to every turn, not just the first one — except slash-command turns (`/<skill> [args]`, e.g. `/claude-maxer show`): there is no user prose there, so this skill should not be called at all. Keep checking each new message even after this skill is already loaded in your context.
 
 ## Examples
 

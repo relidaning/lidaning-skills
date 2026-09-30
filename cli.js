@@ -36,7 +36,7 @@ ${C.bold}Options:${C.reset}
 ${C.bold}Examples:${C.reset}
   lidaning-skills ls
   lidaning-skills add english-practice --global
-  lidaning-skills add coding-orchestrate --project
+  lidaning-skills add memory-orchestrate --project
   lidaning-skills add foo bar --global
 
 If no scope flag is given, the default from the skill's metadata.yaml is used.`);

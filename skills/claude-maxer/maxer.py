@@ -1129,6 +1129,23 @@ def cmd_tick():
     return rc
 
 
+def cmd_show():
+    """The current settings only: both switches, the cron block and the
+    Settings values. Reads local state; no usage fetch, no queue lookup."""
+    now = time.time()
+    try:
+        cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    except OSError:
+        cron = ""
+    installed = "# BEGIN claude-maxer schedule" in cron
+    print(f"scheduler: {paused(now) or 'on'}"
+          + ("" if installed else "  (cron block NOT installed: ./enroll_cron.sh install)"))
+    print(f"weekly limit: {weekly_ignored(now) or 'respected'}")
+    for k, v in CFG.items():
+        print(f"  {k}: {v}")
+    return 0
+
+
 def cmd_status():
     u = fresh_usage()
     now = time.time()
@@ -1157,7 +1174,7 @@ def cmd_status():
 
 def main():
     ap = argparse.ArgumentParser(description="claude-maxer")
-    ap.add_argument("command", choices=["tick", "run", "open", "status", "off", "on", "weekly"])
+    ap.add_argument("command", choices=["tick", "run", "open", "status", "show", "off", "on", "weekly"])
     ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--until", help="with off: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
@@ -1170,7 +1187,7 @@ def main():
         if not a.state:
             ap.error("weekly needs on or off")
         return cmd_weekly(a.state, a.until)
-    if a.command in ("tick", "run", "open", "status"):
+    if a.command in ("tick", "run", "open", "status", "show"):
         try:
             use_skill()
         except (OSError, SkillError) as e:
@@ -1183,6 +1200,8 @@ def main():
         return cmd_run(a.dry_run)
     if a.command == "open":
         return cmd_open(a.dry_run)
+    if a.command == "show":
+        return cmd_show()
     return cmd_status()
 
 

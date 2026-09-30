@@ -1,4 +1,0 @@
-name: coding-orchestrate
-description: Track session progress with TODOs, session logs, memories, and README upkeep.
-scope: project
-tags: [orchestration, sessions, todos, architecture, context]

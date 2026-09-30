@@ -1,0 +1,4 @@
+name: memory-orchestrate
+description: Project memory — recall and record session history (SESSION.md), core concepts (CLAUDE.md Key Concepts, README), and user-stated memories.
+scope: project
+tags: [memory, sessions, concepts, context]

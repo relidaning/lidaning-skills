@@ -40,9 +40,16 @@ skill_desc() {
   awk '/^description:/ {sub("^description: *",""); print; exit}' "$dir/metadata.yaml"
 }
 
+# The agent comes from -agent/--agent (default claude) and is handed to
+# install.sh; check the matching skills dir so pre-selection reflects that
+# agent's installs.
 is_installed_in_cwd() {
   local name="$1"
-  [[ -d "$PWD/.claude/skills/$name" ]]
+  case "$AGENT" in
+    opencode) [[ -d "$PWD/.opencode/skills/$name" ]] ;;
+    all)      [[ -d "$PWD/.claude/skills/$name" && -d "$PWD/.opencode/skills/$name" ]] ;;
+    *)        [[ -d "$PWD/.claude/skills/$name" ]] ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -50,7 +57,7 @@ is_installed_in_cwd() {
 # ---------------------------------------------------------------------------
 
 cmd_list() {
-  printf "${CYAN}lidaning-skills${NC}\n\n"
+  printf "${CYAN}lidaning-skills${NC} ${DIM}[$AGENT]${NC}\n\n"
   while IFS= read -r name; do
     local dir scope desc marker
     dir=$(skill_dir "$name")
@@ -81,6 +88,16 @@ skills_with_mcp() {
 }
 
 cmd_mcp_inject() {
+  if [[ "$AGENT" != "claude" ]]; then
+    local names=()
+    mapfile -t names < <(skills_with_mcp)
+    if [[ ${#names[@]} -eq 0 ]]; then
+      printf "[mcp] no skills ship mcp.json — nothing to inject.\n"
+      return 0
+    fi
+    "$SKILLS_DIR/install.sh" "${names[@]}" --project --mcp-only
+    [[ "$AGENT" == "all" ]] || return 0
+  fi
   python3 - "$SKILLS_DIR" <<'PYEOF'
 import json, sys, os, glob
 
@@ -146,10 +163,18 @@ cmd_manage() {
   local all_skills=()
   local was_installed=()
   local MCP_ITEM="⟶ inject MCP servers into .mcp.json (cwd)"
+  local mcp_file="$PWD/.mcp.json"
+  if [[ "$AGENT" == "opencode" ]]; then
+    MCP_ITEM="⟶ inject MCP servers into opencode.json (cwd)"
+    mcp_file="$PWD/opencode.json"
+    [[ -f "$PWD/opencode.jsonc" ]] && mcp_file="$PWD/opencode.jsonc"
+  elif [[ "$AGENT" == "all" ]]; then
+    MCP_ITEM="⟶ inject MCP servers into .mcp.json + opencode.json (cwd)"
+  fi
 
   local gum_args=(
     choose --no-limit
-    --header="Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
+    --header="[$AGENT] Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
     --cursor-prefix="[ ] "
     --selected-prefix="[x] "
     --unselected-prefix="[ ] "
@@ -158,7 +183,7 @@ cmd_manage() {
     --header.foreground="#06B6D4"
   )
 
-  [[ -f "$PWD/.mcp.json" ]] && gum_args+=(--selected="$MCP_ITEM")
+  [[ -f "$mcp_file" ]] && gum_args+=(--selected="$MCP_ITEM")
 
   while IFS= read -r name; do
     all_skills+=("$name")
@@ -187,7 +212,7 @@ cmd_manage() {
 
   local did_something=false
 
-  # Install newly selected (always into cwd's .claude/skills/)
+  # Install newly selected (into cwd's skills dir for $AGENT)
   for name in "${all_skills[@]}"; do
     if [[ -n "${chosen_set[$name]:-}" ]] && ! is_installed_in_cwd "$name"; then
       printf "${CYAN}[add]${NC} %s\n" "$name"
@@ -224,8 +249,32 @@ usage() {
   printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
   printf "  ${CYAN}ldn${NC}          Toggle skills on/off (checkbox UI)\n"
   printf "  ${CYAN}ldn list${NC}     Plain-text list with install status\n"
-  printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into cwd's .mcp.json\n"
+  printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into cwd's MCP config\n\n"
+  printf "  ${CYAN}-agent <claude|opencode|all>${NC}  Agent to manage skills for (default: claude)\n"
+  printf "      claude    .claude/skills/, .mcp.json\n"
+  printf "      opencode  .opencode/skills/, opencode.json\n"
+  printf "  e.g. ${CYAN}ldn -agent opencode${NC}, ${CYAN}ldn list -agent opencode${NC}\n"
 }
+
+# -agent/--agent/-a may appear anywhere; everything else is the command.
+AGENT="claude"
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  -agent | --agent | -a)
+    [[ $# -ge 2 ]] || { printf "ldn: %s needs claude, opencode or all\n" "$1" >&2; exit 1; }
+    AGENT="$2"; shift 2 ;;
+  -agent=* | --agent=*) AGENT="${1#*=}"; shift ;;
+  *) ARGS+=("$1"); shift ;;
+  esac
+done
+case "$AGENT" in
+claude | opencode | all) ;;
+*) printf "ldn: unknown agent '%s' (expected claude, opencode or all)\n" "$AGENT" >&2; exit 1 ;;
+esac
+# install.sh reads the agent from LDN_AGENT
+export LDN_AGENT="$AGENT"
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 case "${1:-}" in
 list | ls) cmd_list ;;

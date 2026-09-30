@@ -8,7 +8,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | Skill | Scope | Description |
 |---|---|---|
 | `english-practice` | project | Always responds in English; corrects grammar, word choice, phrasing. |
-| `coding-orchestrate` | project | Session tracking, TODO management, ADR records, history context. |
+| `memory-orchestrate` | project | Project memory: session log, core concepts, user-stated memories. |
 | `learning-instruct` | project | Structured learning tutor with goal setting, teaching steps, and quizzes. |
 | `model-switch` | project | Route Claude Code requests to DeepSeek, GLM, Kimi, or OpenRouter. |
 | `obsidian-local` | project | Local Obsidian vault via REST API MCP — search, read, create, update notes. |
@@ -32,6 +32,12 @@ ldn rm
 # Or use install.sh directly
 ./install.sh english-practice --project
 ./install.sh --remove english-practice --project
+
+# OpenCode instead of (or as well as) Claude Code
+./install.sh english-practice --project --opencode      # same as --agent opencode
+./install.sh english-practice --global --agent all      # both agents
+ldn -agent opencode                                      # checkbox UI for .opencode/skills/
+ldn list -agent opencode                                 # (no -agent = Claude Code layout)
 ```
 
 ## How it works
@@ -39,6 +45,13 @@ ldn rm
 `install.sh` (or `ldn`) creates a symlink in `.claude/skills/<name>/` (project)
 or `~/.claude/skills/<name>/` (global). Claude Code discovers the directory
 automatically.
+
+With `--agent opencode` the links go to `.opencode/skills/<name>/` or
+`~/.config/opencode/skills/<name>/` instead, and a skill's `mcp.json` is
+converted into OpenCode's format (`mcp.servers` in `opencode.json[c]`, local
+servers as a command array with `{env:VAR}` references, HTTP ones as
+`"type": "remote"`). OpenCode also reads `.claude/skills/` for compatibility,
+so installing a skill for both agents in the same scope can list it twice there.
 
 Edit `SKILL.md` directly — changes take effect after a session restart.
 
@@ -109,7 +122,7 @@ lidaning-skills/
 ├── how-to-use-skills-in-claude-code.md
 └── skills/
     ├── english-practice/
-    ├── coding-orchestrate/
+    ├── memory-orchestrate/
     ├── learning-instruct/
     ├── model-switch/
     ├── obsidian-local/

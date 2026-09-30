@@ -12,7 +12,7 @@ Trigger claims
 - **T2**: fires on the cue words "summarize", "tl;dr", "gist", "catch me up", "condense", "recap", "brief me".
 
 Non-trigger claims
-- **N1**: not for skill-managed session logs (SESSION.md belongs to coding-orchestrate).
+- **N1**: not for skill-managed session logs (SESSION.md belongs to memory-orchestrate).
 - **N2**: not the built-in `/compact`.
 - **N3**: requests owned by neighboring skills (vault search, paper search, model routing).
 - **N4**: requests with no condensing intent, including ones that use a cue word in another sense.

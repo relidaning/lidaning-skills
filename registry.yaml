@@ -1,8 +1,8 @@
 skills:
   - name: english-practice
     path: skills/english-practice
-  - name: coding-orchestrate
-    path: skills/coding-orchestrate
+  - name: memory-orchestrate
+    path: skills/memory-orchestrate
   - name: learning-instruct
     path: skills/learning-instruct
   - name: obsidian-local

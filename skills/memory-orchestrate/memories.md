@@ -9,10 +9,6 @@ says "remember that…", "don't forget…", "note for next time…", or similar.
 ```markdown
 # Memories
 
-## 2026-05-15 — Use tabs not spaces in this project
-**Context:** User noticed I was indenting with spaces during the refactor.
-**What to remember:** All files in this repo use tabs. Configure editor accordingly.
-
 ## 2026-05-15 — Don't auto-run tests
 **Context:** After I ran `npm test` unprompted.
 **What to remember:** The test suite hits a shared staging DB. Only run tests
@@ -29,6 +25,9 @@ when the user explicitly asks.
 - **Include context** — a short note on *why* this was worth remembering.
   Helps future-you judge whether it still applies.
 - **Don't duplicate** — check the existing list before adding
+- **Verify stated facts** — if the memory is a claim about the code ("this
+  repo uses X"), check it against the codebase first; if it doesn't match,
+  tell the user and record what they want, not the unverified claim
 - **Read on session start** — when resuming work, check MEMORIES.md to
   recall user preferences and conventions
 - **Remove stale entries** — if a memory no longer applies, delete it

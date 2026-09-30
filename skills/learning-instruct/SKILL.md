@@ -15,18 +15,18 @@ description: >
 
 This skill tutors the user through a structured learning process. It generates
 markdown content — goal, compositions, steps, subject reference, issues log,
-and documentation summaries. It hands all output to the coding-orchestrate
+and documentation summaries. It hands all output to the memory-orchestrate
 skill, which owns the recording layer and knows where to persist it.
 
 For local project storage, this skill does **not** write files directly — it
-generates content and passes it to coding-orchestrate for storage. The one
+generates content and passes it to memory-orchestrate for storage. The one
 exception is the vault: when the vault is reachable, this skill writes subject
 files there directly via the obsidian-vault MCP server rather than routing through
-coding-orchestrate (see "Storage location" below). Before handing off local
+memory-orchestrate (see "Storage location" below). Before handing off local
 content, it detects whether a notes MCP (like Obsidian) is connected and asks
 the user where to store the materials — vault or local project.
 
-### Generated files (handed to coding-orchestrate)
+### Generated files (handed to memory-orchestrate)
 
 - **GOAL.md** — what the user wants to learn
 - **[compositions.md](compositions.md)** — the subject broken into parts
@@ -43,7 +43,7 @@ the user where to store the materials — vault or local project.
 
 ### Phase 1: Goal
 
-If no goal is active (check with coding-orchestrate), **check besmart before
+If no goal is active (check with memory-orchestrate), **check besmart before
 reading the project**. besmart (`/data/apps/besmart`) is a separate app with
 its own "Study Plans" feature; when it's reachable it is the resource this
 skill draws curricula from — see "BeSmart integration" below for the full
@@ -100,7 +100,7 @@ learn? Present it plainly:
 > level of mastery you're aiming for.
 
 Let the user confirm or correct. Once confirmed, generate GOAL.md content and
-hand it to coding-orchestrate for recording.
+hand it to memory-orchestrate for recording.
 
 If the project context doesn't give enough signal, fall back to asking:
 
@@ -133,7 +133,7 @@ skill), so the Obsidian app does not need to be running. Probe it silently:
   preference, generated docs go to the vault root so they're easy to find.
   Do **not** ask the user; just write there and tell them the note path. On
   every subsequent update, overwrite the same path.
-- **Vault unreachable** — fall back to coding-orchestrate for local project storage.
+- **Vault unreachable** — fall back to memory-orchestrate for local project storage.
 
 ### Phase 2: Compose
 
@@ -157,7 +157,7 @@ toolset covered *inside* whichever workflow milestone needs them, not the
 part's name or organizing principle. A user should be able to read the part
 titles alone and see the shape of solving the actual problem, not a table of
 contents for the library's API. Generate compositions.md content (opening
-with the problem statement) and hand to coding-orchestrate.
+with the problem statement) and hand to memory-orchestrate.
 
 Present the breakdown to the user, including the problem statement it's
 anchored on. Let them reorder, add, or remove parts before proceeding.
@@ -266,7 +266,7 @@ to the symptom that motivated it. For each leaf:
    correct — the ban is on parents, not on parts.) Don't wait for Phase 4
    (see [steps.md](steps.md))
 
-Hand steps.md updates to coding-orchestrate as progress is made.
+Hand steps.md updates to memory-orchestrate as progress is made.
 
 #### Interactive hints
 
@@ -278,14 +278,14 @@ of the last explanation — something new that connects or extends.
 
 **`/learning-instruct quiz`** — Pop a question about the current part. Test
 understanding with a focused, single-concept question. After the user answers,
-explain the correct answer and why. Hand the Q&A to coding-orchestrate for
+explain the correct answer and why. Hand the Q&A to memory-orchestrate for
 the subject file.
 
 **`/learning-instruct scenario`** — Pop a realistic problem that requires
 applying the current concept. More open-ended than a quiz — the user should
 solve or design something. After they answer, evaluate their solution and
 point out what they handled well and what they missed. Hand the problem,
-solution, and notes to coding-orchestrate for the subject file.
+solution, and notes to memory-orchestrate for the subject file.
 
 These commands only work when a learning track is active (goal exists and
 a part is in progress).
@@ -297,7 +297,7 @@ When the user provides a URL or document during a learning track:
 1. Fetch and read the resource (use WebFetch for URLs, Read for local files)
 2. Generate a summary file — source content only, no added knowledge
 3. Generate an updated DOCUMENTATIONS.md index entry
-4. Hand both to coding-orchestrate for recording
+4. Hand both to memory-orchestrate for recording
 
 **Critical rule: source content only.** Summarize what the resource actually
 says. Do NOT mix in explanations, context, or corrections from your own
@@ -319,7 +319,7 @@ After all parts are taught, run a comprehensive evaluation:
    `besmart_sync.py complete-plan <plan_id>` so the plan shows complete in
    besmart too
 
-Hand all evaluation output to coding-orchestrate for recording.
+Hand all evaluation output to memory-orchestrate for recording.
 
 ## BeSmart integration
 
@@ -376,7 +376,7 @@ works exactly as it did before this integration existed.
 ## Rules
 
 - **Generate, don't write, for local project storage** — this skill generates
-  markdown content and hands it to coding-orchestrate, which owns local vault
+  markdown content and hands it to memory-orchestrate, which owns local vault
   paths and I/O details. The vault path is the one exception: when Obsidian is
   reachable, this skill writes subject files there directly (see "Storage
   location") instead of handing off

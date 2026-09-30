@@ -5,14 +5,15 @@ Records what happened in each coding session. The file lives at
 gitignored; the session log is meant to be versioned). Update it **before
 every exit** — when the user types `/exit` or the session ends.
 
-> **Safety net:** the `SessionEnd` hook in `~/.claude/settings.json` runs a
-> headless Claude that also writes this file automatically, so the entry is
-> guaranteed even if the skill is not explicitly invoked at exit.
+> **Safety net:** the `SessionEnd` hook (`~/.claude/hooks/summarize-session.sh`)
+> runs a headless Claude that also writes an entry from the transcript. Check
+> the top entry before writing, so the same session isn't logged twice.
 
 ## Format
 
-Keep it short. 1–2 sentences per session is enough — just enough to remember
-what happened when you come back.
+Keep it short — a title line and a body of 1–5 sentences: what was done,
+any non-obvious decision and its why, and **what was left unfinished** (the
+part the next session needs most).
 
 ```markdown
 # Sessions
@@ -36,8 +37,10 @@ Used ioredis over node-redis — cleaner API, better cluster support.
 - **One file** — `SESSION.md` at project root, newest session first
 - **Update before exit** — capture what happened before the session ends.
   Don't wait until the user asks.
-- **1–2 sentences** — a title line and a body line. No sections, no bullet
-  lists. If it needs more, the session was too broad.
+- **1–5 sentences** — a title line and one paragraph. No sections, no bullet
+  lists.
+- **State what's pending** — uncommitted work, unapplied fixes, anything
+  waiting on the user. Say "Uncommitted." when it is.
 - **Include decisions inline** — if you made a non-obvious choice, mention
   the why in the same sentence. No separate Decisions section.
 - **Read on resume** — when the user says "continue", read the last session

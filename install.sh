@@ -4,9 +4,18 @@ set -euo pipefail
 SKILLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGISTRY="$SKILLS_DIR/registry.yaml"
 
-# Claude Code skill paths
+# Skill paths per coding agent. OpenCode (v2) scans <config dir>/skills for
+# both its global config dir and the project's .opencode/ dir; it also reads
+# .claude/skills for compatibility, but installing into its own dir keeps it
+# working when that compatibility layer is turned off.
 GLOBAL_SKILLS="$HOME/.claude/skills"
 PROJECT_SKILLS=".claude/skills"
+OPENCODE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+OC_GLOBAL_SKILLS="$OPENCODE_CONFIG/skills"
+OC_PROJECT_SKILLS=".opencode/skills"
+
+# Which agent(s) to install for: claude, opencode, or all
+AGENT="${LDN_AGENT:-claude}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -19,20 +28,32 @@ err()  { echo -e "${RED}[error]${NC} $*"; }
 
 usage() {
   cat <<EOF
-Usage: install.sh <skill-name...> [--global|--project] [--remove] [--list] [--installed]
+Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [--list] [--installed]
 
-  --global      Install to ~/.claude/skills/ (personal, all projects)
-  --project     Install to .claude/skills/ (this repo only)
+  --global      Install to the agent's global skills dir (all projects)
+  --project     Install to the agent's project skills dir (this repo only)
+  --agent A     claude (default), opencode, or all; also settable via LDN_AGENT
+  --opencode    Shorthand for --agent opencode
+  --mcp-only    Only register the skills' MCP servers (used by `ldn mcp inject`)
   --remove      Uninstall the skill
   --list        List all available skills
   --installed   Show install status of each skill (global/project)
 
 Examples:
   install.sh english-practice --global
-  install.sh coding-orchestrate --project
+  install.sh memory-orchestrate --project
   install.sh --remove english-practice --global
+  install.sh english-practice --project --agent opencode
   install.sh --list
   install.sh --installed
+
+Skill dirs:
+  claude    global ~/.claude/skills/            project .claude/skills/
+  opencode  global ~/.config/opencode/skills/   project .opencode/skills/
+
+MCP servers (skills that ship mcp.json):
+  claude    global ~/.claude/settings.json      project .mcp.json + .claude/settings.local.json
+  opencode  global ~/.config/opencode/opencode.json[c]   project opencode.json[c]
 EOF
   exit 0
 }
@@ -83,6 +104,24 @@ list_skills() {
   done < "$REGISTRY"
 }
 
+agents() {
+  case "$AGENT" in
+    claude|opencode) echo "$AGENT" ;;
+    all)             echo "claude opencode" ;;
+    *) err "Unknown agent '$AGENT' (expected claude, opencode or all)" >&2; exit 1 ;;
+  esac
+}
+
+skills_root() {
+  local agent="$1" scope="$2"
+  case "$agent:$scope" in
+    claude:global)    echo "$GLOBAL_SKILLS" ;;
+    claude:*)         echo "$PROJECT_SKILLS" ;;
+    opencode:global)  echo "$OC_GLOBAL_SKILLS" ;;
+    opencode:*)       echo "$OC_PROJECT_SKILLS" ;;
+  esac
+}
+
 install_status() {
   # Distinguishes not-installed from a dangling symlink (e.g. after the
   # source skill dir was renamed/moved), which -e alone can't do since it
@@ -104,14 +143,16 @@ install_status() {
 list_installed() {
   echo "Skill install status:"
   echo ""
-  printf "  %-25s %-10s %-10s\n" "SKILL" "GLOBAL" "PROJECT"
+  printf "  %-25s %-10s %-10s %-10s %-10s\n" "SKILL" "GLOBAL" "PROJECT" "OC-GLOBAL" "OC-PROJECT"
   while IFS= read -r line; do
     if [[ "$line" =~ ^\ *-\ name: ]]; then
       local name="${line#*: }"
       read -r path_line
-      local global_status=$(install_status "$GLOBAL_SKILLS/$name/SKILL.md")
-      local project_status=$(install_status "$PROJECT_SKILLS/$name/SKILL.md")
-      printf "  %-25s %-10s %-10s\n" "$name" "$global_status" "$project_status"
+      printf "  %-25s %-10s %-10s %-10s %-10s\n" "$name" \
+        "$(install_status "$GLOBAL_SKILLS/$name/SKILL.md")" \
+        "$(install_status "$PROJECT_SKILLS/$name/SKILL.md")" \
+        "$(install_status "$OC_GLOBAL_SKILLS/$name/SKILL.md")" \
+        "$(install_status "$OC_PROJECT_SKILLS/$name/SKILL.md")"
     fi
   done < "$REGISTRY"
 }
@@ -208,9 +249,71 @@ PYEOF
   fi
 }
 
+# OpenCode keeps MCP servers in opencode.json[c] under mcp.servers, in its own
+# shape: local servers take a command array + "environment", remote ones
+# "type": "remote", and env references are {env:VAR} instead of ${VAR}.
+# One helper handles add and remove; the file may be JSONC, so comments are
+# stripped on read (and are not preserved on write).
+
+opencode_mcp() {
+  local action="$1" mcp_json="$2" scope="$3"
+  local base
+  if [[ "$scope" == "global" ]]; then base="$OPENCODE_CONFIG/opencode"; else base="opencode"; fi
+  local cfg="$base.json"
+  [[ -f "$base.jsonc" ]] && cfg="$base.jsonc"
+  [[ "$action" == "remove" && ! -f "$cfg" ]] && return 0
+  mkdir -p "$(dirname "$cfg")"
+  python3 - "$action" "$cfg" "$mcp_json" <<'PYEOF'
+import json, os, re, sys
+action, cfg_file, skill_mcp_file = sys.argv[1:4]
+
+def load_jsonc(path):
+    if not os.path.exists(path):
+        return {"$schema": "https://opencode.ai/config.json"}
+    text = open(path).read()
+    # Drop // and /* */ comments outside strings, then trailing commas.
+    text = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/',
+                  lambda m: m.group(0) if m.group(0).startswith('"') else "",
+                  text, flags=re.S)
+    text = re.sub(r',(\s*[}\]])', r'\1', text)
+    return json.loads(text) if text.strip() else {}
+
+def env_ref(v):
+    return re.sub(r'\$\{(\w+)\}', r'{env:\1}', v) if isinstance(v, str) else v
+
+def convert(entry):
+    if "command" in entry:
+        out = {"type": "local", "command": [entry["command"], *entry.get("args", [])]}
+        if entry.get("env"):
+            out["environment"] = {k: env_ref(v) for k, v in entry["env"].items()}
+    else:
+        out = {"type": "remote", "url": env_ref(entry["url"])}
+        if entry.get("headers"):
+            out["headers"] = {k: env_ref(v) for k, v in entry["headers"].items()}
+    return out
+
+cfg = load_jsonc(cfg_file)
+skill_mcp = json.load(open(skill_mcp_file))
+servers = cfg.setdefault("mcp", {}).setdefault("servers", {})
+for name, entry in skill_mcp.items():
+    if action == "add":
+        servers[name] = convert(entry)
+    else:
+        servers.pop(name, None)
+if not servers:
+    cfg["mcp"].pop("servers")
+    if not cfg["mcp"]:
+        cfg.pop("mcp")
+with open(cfg_file, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PYEOF
+}
+
 install_skill() {
   local name="$1"
   local scope_override="${2:-}"
+  local agent="$3"
 
   local skill_dir="$SKILLS_DIR/$(skill_path "$name")"
   if [[ ! -d "$skill_dir" ]]; then
@@ -219,15 +322,22 @@ install_skill() {
   fi
 
   local scope="${scope_override:-$(skill_scope "$skill_dir")}"
+  local install_dir=$(skills_root "$agent" "$scope")
 
-  local install_dir
-  if [[ "$scope" == "global" ]]; then
-    install_dir="$GLOBAL_SKILLS"
-  else
-    install_dir="$PROJECT_SKILLS"
+  # --mcp-only (used by `ldn mcp inject`): register MCP servers, link nothing
+  if $MCP_ONLY; then
+    if [[ -f "$skill_dir/mcp.json" ]]; then
+      if [[ "$agent" == "opencode" ]]; then
+        opencode_mcp add "$skill_dir/mcp.json" "$scope"
+      else
+        merge_mcp_config "$skill_dir/mcp.json" "$scope"
+      fi
+      log "Registered MCP server(s) from $name [$agent]"
+    fi
+    return 0
   fi
 
-  # Claude Code skills are directories: skills/<name>/SKILL.md
+  # Skills are directories (same layout for Claude Code and OpenCode): skills/<name>/SKILL.md
   # Symlink skill.md as SKILL.md, plus all supporting .md files
   local link_dir="$install_dir/${name}"
   mkdir -p "$link_dir"
@@ -247,12 +357,16 @@ install_skill() {
     ln -sf "$(realpath "$f")" "$link_dir/$base"
   done
 
-  log "Linked $name -> $link_dir/"
+  log "Linked $name -> $link_dir/ [$agent]"
 
   # Register MCP server if skill ships one
   if [[ -f "$skill_dir/mcp.json" ]]; then
-    merge_mcp_config "$skill_dir/mcp.json" "$scope"
-    log "Registered MCP server(s) from $name"
+    if [[ "$agent" == "opencode" ]]; then
+      opencode_mcp add "$skill_dir/mcp.json" "$scope"
+    else
+      merge_mcp_config "$skill_dir/mcp.json" "$scope"
+    fi
+    log "Registered MCP server(s) from $name [$agent]"
   fi
 }
 
@@ -265,12 +379,8 @@ remove_skill() {
   fi
 
   local scope="${2:-$(skill_scope "$skill_dir")}"
-  local install_dir
-  if [[ "$scope" == "global" ]]; then
-    install_dir="$GLOBAL_SKILLS"
-  else
-    install_dir="$PROJECT_SKILLS"
-  fi
+  local agent="$3"
+  local install_dir=$(skills_root "$agent" "$scope")
 
   local link_dir="$install_dir/${name}"
   if [[ -d "$link_dir" ]]; then
@@ -282,8 +392,12 @@ remove_skill() {
 
   # Deregister MCP server if skill ships one
   if [[ -f "$skill_dir/mcp.json" ]]; then
-    remove_mcp_config "$skill_dir/mcp.json" "$scope"
-    log "Removed MCP server(s) from $name"
+    if [[ "$agent" == "opencode" ]]; then
+      opencode_mcp remove "$skill_dir/mcp.json" "$scope"
+    else
+      remove_mcp_config "$skill_dir/mcp.json" "$scope"
+    fi
+    log "Removed MCP server(s) from $name [$agent]"
   fi
 }
 
@@ -291,6 +405,7 @@ remove_skill() {
 
 SCOPE=""
 REMOVE=false
+MCP_ONLY=false
 SKILLS=()
 
 while [[ $# -gt 0 ]]; do
@@ -298,6 +413,10 @@ while [[ $# -gt 0 ]]; do
     --global)   SCOPE="global"; shift ;;
     --project)  SCOPE="project"; shift ;;
     --remove)   REMOVE=true; shift ;;
+    --agent)    AGENT="${2:?--agent needs claude, opencode or all}"; shift 2 ;;
+    --agent=*)  AGENT="${1#*=}"; shift ;;
+    --opencode) AGENT="opencode"; shift ;;
+    --mcp-only) MCP_ONLY=true; shift ;;
     --list)     list_skills; exit 0 ;;
     --installed) list_installed; exit 0 ;;
     -h|--help)  usage ;;
@@ -309,10 +428,14 @@ if [[ ${#SKILLS[@]} -eq 0 ]]; then
   usage
 fi
 
-for skill in "${SKILLS[@]}"; do
-  if $REMOVE; then
-    remove_skill "$skill" "$SCOPE"
-  else
-    install_skill "$skill" "$SCOPE"
-  fi
+AGENTS=$(agents) || exit 1
+
+for agent in $AGENTS; do
+  for skill in "${SKILLS[@]}"; do
+    if $REMOVE; then
+      remove_skill "$skill" "$SCOPE" "$agent"
+    else
+      install_skill "$skill" "$SCOPE" "$agent"
+    fi
+  done
 done
