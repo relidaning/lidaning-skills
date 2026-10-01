@@ -7,8 +7,8 @@ description: >
   Work comes from the task queue (tasks-queue skill) when one is available; the tasks listed here
   are the defaults, run only when no task queue is available.
   Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer,
-  or to ignore / respect the weekly (7d) limit.
-argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [show] [status]"
+  or to ignore / respect the weekly (7d) limit, or to turn back-to-back windows (b2b) on or off.
+argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [b2b on|off] [show] [status]"
 ---
 
 # Claude-maxer
@@ -37,11 +37,13 @@ unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
 | `scheduler on` | `./run_maxer_work.sh on` |
 | `weekly off [--until T]` | `./run_maxer_work.sh weekly off [--until T]` (ignore the 7d budget) |
 | `weekly on` | `./run_maxer_work.sh weekly on` (respect it again) |
-| `show` | `./run_maxer_work.sh show` (current settings: scheduler and weekly switches, cron block, Settings values; offline) |
+| `b2b on [--until T]` | `./run_maxer_work.sh b2b on [--until T]` (back-to-back windows: open the next one as soon as the last resets) |
+| `b2b off` | `./run_maxer_work.sh b2b off` (open windows in the pin hours only) |
+| `show` | `./run_maxer_work.sh show` (current settings: scheduler, weekly and b2b switches, cron block, Settings values; offline) |
 | `status` | `./run_maxer_work.sh status` (settings plus live usage, budget and the queue's next task) |
 
-Both switches can be combined in one call, e.g.
-`/claude-maxer scheduler on weekly off`. After `scheduler off`, say whether a
+Switches can be combined in one call, e.g.
+`/claude-maxer scheduler on weekly off b2b on`. After `scheduler off`, say whether a
 task is still running (`pgrep -af 'claude -p'`): the switch stops new tasks,
 not one already in progress. Anything else is not a command: treat it as a
 normal request. With no arguments, the skill works as described below.
@@ -63,6 +65,9 @@ drifted, so the timing lives in `maxer.py` and cron only wakes it up:
 - **No window open, during a pin hour** (`OPEN_HOURS`: 03, 08, 13, 18, 23)
   → `open` once per pin hour. A late reset (say 08:40) is picked up at the
   next tick in the same hour, and a failed ping retries on the next tick.
+- **No window open, back-to-back on** (`b2b on`) → every hour counts as a
+  pin hour, so the next window opens at the first tick after a reset,
+  whatever the time (a 10:40 reset reopens at 10:40, not at 13:00).
 - **Anything else** → exit without writing anything. `open` and `run` log
   their own decisions, skips included, so each window and pin gets one line
   in the vault log, not one per tick.
@@ -74,7 +79,9 @@ backup opener in case this machine is off. Manage the local block with
 
 **24h isn't a multiple of 5h.** A window lasts exactly 5h from its first
 request, so the 23:00 window runs until 04:00 and the 03:00 pin finds it
-still open. That's four real windows a day (23, 08, 13, 18). The weekly
+still open. That's four real windows a day (23, 08, 13, 18). With `b2b on`
+the 04:00 reset reopens at once and the windows chain round the clock
+(about 4.8 a day), drifting with whoever opened the last one. The weekly
 cap limits the total anyway.
 
 ## Settings
@@ -202,6 +209,8 @@ this file can't be parsed, `run` logs `skill_error` there and does nothing.
 ./run_maxer_work.sh on              # switch back on
 ./run_maxer_work.sh weekly off      # ignore the weekly (7d) limit; also takes --until
 ./run_maxer_work.sh weekly on       # respect it again (today's budget ceiling applies)
+./run_maxer_work.sh b2b on          # back-to-back windows; also takes --until
+./run_maxer_work.sh b2b off         # open windows in the pin hours only
 ```
 
 **The switch.** `off` writes `~/.claude/state/claude-maxer-off.json`; while
@@ -224,6 +233,17 @@ use up the week in a few days. Once 7d reaches 100% Anthropic locks you out
 `status` shows the switch, and each run's log line notes when the ceiling was
 ignored. When the user asks to ignore, disable, drop, respect or re-enable
 the weekly limit, run these commands.
+
+**The back-to-back switch.** `b2b on` writes
+`~/.claude/state/claude-maxer-b2b.json`; while it exists, the tick opens a
+new window as soon as the last one has reset, at any hour, so no time
+passes with no window open. Without it (the default) windows open only in
+the pin hours, which keeps them on fixed slots but leaves gaps after a
+drifted reset and between 04:00 and 08:00. Only the opening changes: each
+window is still filled in its last hour, and the 5h target, the weekly
+budget and the main off switch apply as before. An opening ping costs
+almost nothing. `show` and `status` print the switch. When the user asks to
+turn back-to-back (b2b, chained windows) on or off, run these commands.
 
 Any setting can be overridden for a manual test with env `MAXER_<KEY>`,
 e.g. `MAXER_CONCURRENCY=1`.

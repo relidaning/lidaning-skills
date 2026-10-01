@@ -12,7 +12,8 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           of fixed hours: calls `run` once per window when it is within
           RUN_LEAD_MIN of its reset, and `open` once per pin hour
           (OPEN_HOURS) when no window is open. Every other tick exits
-          without writing anything.
+          without writing anything. With `b2b on`, every hour counts as a
+          pin hour, so a window is opened as soon as the last one resets.
   open    Start a 5h window with a one-word Haiku ping. If a window is still
           open and resets within 20 min, wait for the reset and ping right
           after it. If it resets later than that, do nothing.
@@ -38,6 +39,11 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           Ignore / respect the weekly (7d) limit. Off: runs skip today's
           weekly-budget ceiling and fill each window to the 5h target, so the
           week can run out early. Takes --until like `off`.
+  b2b on|off
+          Back-to-back windows. On: the tick opens the next window as soon
+          as the last one resets, at any hour, not only in the pin hours.
+          Each window is still filled only in its last hour. `b2b on` takes
+          --until like `off`.
 
 Vault output (written only when tasks run), under the vault root:
   claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task
@@ -47,6 +53,7 @@ Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
 Usage: maxer.py tick | run|open|status [--dry-run] | off [--until WHEN] | on
                | weekly off [--until WHEN] | weekly on
+               | b2b on [--until WHEN] | b2b off
 """
 import argparse
 import fcntl
@@ -70,6 +77,7 @@ ROTATION_PATH = os.path.join(STATE_DIR, "claude-maxer-rotation.json")
 BUDGET_PATH = os.path.join(STATE_DIR, "claude-maxer-day.json")
 PAUSE_PATH = os.path.join(STATE_DIR, "claude-maxer-off.json")  # present = paused
 WEEKLY_OFF_PATH = os.path.join(STATE_DIR, "claude-maxer-weekly-off.json")  # present = ignore 7d
+B2B_PATH = os.path.join(STATE_DIR, "claude-maxer-b2b.json")  # present = back-to-back windows
 WORK_DIR = os.path.join(STATE_DIR, "claude-maxer-work")  # neutral cwd: no repo CLAUDE.md
 RUN_LOCK = "/tmp/claude-maxer-run.lock"
 TICK_LOCK = "/tmp/claude-maxer-tick.lock"
@@ -83,7 +91,7 @@ STOP_MARGIN_MIN = 10       # stop starting tasks this close to the reset
 KILL_MARGIN_S = 120        # hard-kill running tasks this long before the reset
 SNAPSHOT_MAX_AGE_S = 20 * 60
 OPEN_WAIT_MAX_S = 20 * 60  # opener waits for a reset at most this long
-OPEN_HOURS = (3, 8, 13, 18, 23)  # tick opens a window only during these hours
+OPEN_HOURS = (3, 8, 13, 18, 23)  # tick opens a window only during these hours (any hour with b2b on)
 RUN_LEAD_MIN = 60          # tick starts `run` this long before the window resets
 SAME_RESET_S = 300         # resets_at jitters between fetches; this close = same window
 DEFAULT_TASK_PCT = 4.0     # first guess at 5h% per task; replaced by measurement
@@ -276,6 +284,11 @@ def weekly_ignored(now):
     return switch_state(WEEKLY_OFF_PATH, now, "maxer.py weekly on", "weekly limit ignored")
 
 
+def b2b_on(now):
+    """Reason string if back-to-back windows are switched on, else None."""
+    return switch_state(B2B_PATH, now, "maxer.py b2b off", "on")
+
+
 def parse_until(s, now):
     m = re.fullmatch(r"(\d+)\s*([mhd])", s.strip())
     if m:
@@ -340,6 +353,21 @@ def cmd_weekly(state, until):
             raise SystemExit("--until goes with `weekly off`")
         print("weekly limit is RESPECTED again" if clear_switch(WEEKLY_OFF_PATH, "weekly_on")
               else "weekly limit was already respected")
+    return 0
+
+
+def cmd_b2b(state, until):
+    """`b2b on`: the tick opens the next 5h window as soon as the last one
+    resets, at any hour. `b2b off`: only in the pin hours (OPEN_HOURS)."""
+    if state == "on":
+        end = set_switch(B2B_PATH, until, "b2b_on")
+        print("back-to-back windows are ON " + (f"until {datetime.fromtimestamp(end):%Y-%m-%d %H:%M}"
+                                                if end else "until `maxer.py b2b off`"))
+    else:
+        if until:
+            raise SystemExit("--until goes with `b2b on`")
+        print("back-to-back windows are OFF (pin hours only)" if clear_switch(B2B_PATH, "b2b_off")
+              else "back-to-back windows were already off")
     return 0
 
 
@@ -1077,20 +1105,21 @@ def cmd_open(dry_run):
     return 0 if rc == 0 else 1
 
 
-def pin_slot(now):
+def pin_slot(now, any_hour=False):
     """Start of the pin hour `now` is in, or None. Windows are opened only
     here, so a window someone else opened off-pin doesn't make every later
-    window drift with it."""
+    window drift with it. `any_hour` (b2b on): every hour is a pin hour, so
+    the next window opens right after a reset, drift included."""
     d = datetime.fromtimestamp(now)
-    if d.hour not in OPEN_HOURS:
+    if d.hour not in OPEN_HOURS and not any_hour:
         return None
     return d.replace(minute=0, second=0, microsecond=0).timestamp()
 
 
 def cmd_tick():
     """Cron runs this every 10 min. `run` fires once per window, RUN_LEAD_MIN
-    before its actual reset; `open` fires once per pin hour, only when no
-    window is open. open/run log their own decisions (skips included), so a
+    before its actual reset; `open` fires once per pin hour (once per hour
+    with b2b on), only when no window is open. open/run log their own decisions (skips included), so a
     window or pin gets one vault line, not one per tick."""
     lk = open(TICK_LOCK, "w")
     try:
@@ -1119,7 +1148,7 @@ def cmd_tick():
         st["ran_for"] = reset
         save()
         return cmd_run(False)
-    slot = pin_slot(now)
+    slot = pin_slot(now, any_hour=bool(b2b_on(now)))
     if slot is None or st.get("opened_for") == slot:
         return 0
     rc = cmd_open(False)
@@ -1141,6 +1170,7 @@ def cmd_show():
     print(f"scheduler: {paused(now) or 'on'}"
           + ("" if installed else "  (cron block NOT installed: ./enroll_cron.sh install)"))
     print(f"weekly limit: {weekly_ignored(now) or 'respected'}")
+    print(f"back-to-back: {b2b_on(now) or 'off (windows open in pin hours only)'}")
     for k, v in CFG.items():
         print(f"  {k}: {v}")
     return 0
@@ -1153,6 +1183,7 @@ def cmd_status():
     b = day_budget(u, now, persist=False)
     print(f"switch: {paused(now) or 'on'}")
     print(f"weekly limit: {weekly_ignored(now) or 'respected (today’s ceiling applies)'}")
+    print(f"back-to-back: {b2b_on(now) or 'off (windows open in pin hours only)'}")
     print(f"5h {u['five_pct']}%  resets {hm(u['five_reset']) if u['five_reset'] else '-'}"
           f"  | 7d {u['seven_pct']}%  today's budget {b['budget']}pp "
           f"(from {b['seven_start']}% → ceiling {b['ceiling']}%, {b['days_left']} days left)")
@@ -1166,6 +1197,8 @@ def cmd_status():
     if window_open(u, now):
         print(f"tick: runs at ~{hm(u['five_reset'] - RUN_LEAD_MIN * 60)} "
               f"({RUN_LEAD_MIN} min before the {hm(u['five_reset'])} reset)")
+    elif b2b_on(now):
+        print("tick: no window open; opens one at the next tick (back-to-back is on)")
     else:
         pins = ", ".join(f"{h:02d}" for h in OPEN_HOURS)
         print(f"tick: no window open; opens one in the next pin hour ({pins})")
@@ -1174,10 +1207,10 @@ def cmd_status():
 
 def main():
     ap = argparse.ArgumentParser(description="claude-maxer")
-    ap.add_argument("command", choices=["tick", "run", "open", "status", "show", "off", "on", "weekly"])
-    ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly")
+    ap.add_argument("command", choices=["tick", "run", "open", "status", "show", "off", "on", "weekly", "b2b"])
+    ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly or b2b")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--until", help="with off: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
+    ap.add_argument("--until", help="with off, weekly off or b2b on: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
     a = ap.parse_args()
     if a.command == "off":
         return cmd_off(a.until)
@@ -1187,6 +1220,10 @@ def main():
         if not a.state:
             ap.error("weekly needs on or off")
         return cmd_weekly(a.state, a.until)
+    if a.command == "b2b":
+        if not a.state:
+            ap.error("b2b needs on or off")
+        return cmd_b2b(a.state, a.until)
     if a.command in ("tick", "run", "open", "status", "show"):
         try:
             use_skill()
