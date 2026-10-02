@@ -131,7 +131,16 @@ news). The order, as the queue hands it out:
    tasks in parallel; `run` reports it with `tasks_queue.py news-ran`).
    News tasks marked `(daily)` in tasks-queue (e.g. Papers) lead this batch
    every day and never run as filler.
-3. **An optimize task**: one app under `/data/apps`, delivered as a PR. It
+3. **A review task**, when an app has optimization PRs nobody has judged
+   yet: one app's open `opt/` PRs, at most 3 per task. The session tests
+   each in a fresh worktree and squash-merges on GitHub the ones it could
+   verify; it holds what it can't prove or what is yours to decide
+   (secrets, stored data, deployment), and closes what is superseded. It
+   never redeploys. `run` reads each PR's real state back with `gh`, files
+   the report in `claude-maxer/optimize/<app>.md`, and tells the queue
+   which PRs are still open, so they wait for you and aren't reviewed
+   again. Details and the worker prompt: tasks-queue's `## Review tasks`.
+   Then **an optimize task**: one app under `/data/apps`, delivered as a PR. It
    runs alone, in the app's directory, but edits only a fresh git worktree
    on a new `opt/<app>-<stamp>` branch, so your checkout is never touched.
    It pushes and opens a PR only for your own `relidaning/*` repos (a local
@@ -185,7 +194,9 @@ Find the 10 most important stories from the last 48 hours on China's technology 
 - Vault tasks land as commits in their own repo, not in the news note.
 - `claude-maxer/optimize/<app>.md`: one dated report per optimize visit
   (what it is, findings, what was chosen and why, before → after, what's
-  left for you). The fix itself is a PR in the app's repo.
+  left for you). The fix itself is a PR in the app's repo. Review tasks
+  add a `review` section to the same note: per PR, merged, held or closed,
+  with the evidence and whether a redeploy is needed.
 - `claude-maxer/log/YYYY-MM-DD.md`: today's budget, then one line for
   **every scheduled decision** (each `open` and `run` a tick starts,
   including skips and why), and a block for each run that starts tasks: usage at start, a link

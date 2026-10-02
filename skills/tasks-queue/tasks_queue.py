@@ -302,6 +302,113 @@ def cmd_optimize():
     return 0
 
 
+# ── review tier ────────────────────────────────────────────────────────────
+# The optimize tier's PRs pile up unmerged unless something checks them. One
+# review task takes one app's open `opt/` PRs (a few at a time, oldest first),
+# verifies each, and merges the ones that hold up. A PR the worker leaves
+# open is remembered as held and not handed out again: it waits for the user.
+# Delete an app's "review" entry in the optimize state file to re-review it.
+
+REVIEW_MAX_PRS = 3      # per task: more won't fit one session's budget
+REVIEW_MAX_FAILS = 2    # failed review sessions before an app's batch is held
+GH_TIMEOUT_S = 20
+
+
+def review_prompt(path=SKILL_PATH):
+    with open(path) as f:
+        text = f.read()
+    m = re.search(r"^## Review tasks.*?^```review-prompt\n(.*?)^```", text, re.S | re.M)
+    return m.group(1).strip() if m else ""
+
+
+def open_opt_prs(slug):
+    """Open PRs from `opt/` branches in GitHub repo `slug`, oldest first, or
+    None if gh can't be asked (never read as "no PRs")."""
+    import subprocess
+    try:
+        p = subprocess.run(["gh", "pr", "list", "--repo", slug, "--state", "open", "--limit",
+                            "100", "--json", "number,title,headRefName,url"],
+                           capture_output=True, text=True, timeout=GH_TIMEOUT_S)
+        if p.returncode != 0:
+            return None
+        prs = [{"number": x["number"], "title": x["title"], "branch": x["headRefName"],
+                "url": x["url"]} for x in json.loads(p.stdout)
+               if x["headRefName"].startswith("opt/")]
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+        return None
+    return sorted(prs, key=lambda x: x["number"])
+
+
+def review_task():
+    """{kind, app, path, base, repo, remote, prs, worktree, prompt} for the
+    next app with optimization PRs nobody has reviewed yet, or None."""
+    prompt = review_prompt()
+    if not prompt:
+        return None
+    state = read_optimize_state()
+    apps = []
+    for name, entry in state.items():
+        full = os.path.join(APPS_ROOT, name)
+        if (entry.get("status") == "skip" or name in OPTIMIZE_EXCLUDE
+                or not os.path.isdir(os.path.join(full, ".git"))):
+            continue
+        checked = entry.get("review", {}).get("checked", 0)
+        if entry.get("ts", 0) <= checked:
+            continue  # no optimize visit since the last look: nothing new to find
+        apps.append((checked, name, full))
+    for _, name, full in sorted(apps):
+        facts = repo_facts(full)
+        prs = open_opt_prs(facts["repo"]) if facts["pr"] else []
+        if prs is None:
+            print(f"note: gh couldn't list {facts['repo']}'s PRs; skipping it", file=sys.stderr)
+            continue
+        review = state[name].setdefault("review", {})
+        held = set(review.get("held", []))
+        todo = [p for p in prs if p["number"] not in held]
+        if not todo:
+            review["checked"] = time.time()
+            write_optimize_state(state)
+            continue
+        batch = todo[:REVIEW_MAX_PRS]
+        t = {"kind": "review", "app": name, "path": full, **facts, "prs": batch,
+             "worktree": os.path.join(WORKTREE_ROOT,
+                                      f"{name}-review-{time.strftime('%Y%m%d-%H%M')}")}
+        rest = [f"- #{p['number']} {p['title']}"
+                + (" (held by an earlier review)" if p["number"] in held else " (a later review)")
+                for p in prs if p not in batch]
+        fill = dict(t,
+                    pr_list="\n".join(f"- #{p['number']} {p['title']} ({p['branch']})"
+                                      for p in batch),
+                    other_prs="\n".join(rest) or "- none")
+        t["prompt"] = re.sub(r"\{(\w+)\}", lambda m: str(fill.get(m[1], m[0])), prompt)
+        return t
+    return None
+
+
+def cmd_review():
+    t = review_task()
+    if not t:
+        return 1
+    print(json.dumps(t, ensure_ascii=False))
+    return 0
+
+
+def cmd_review_done(app, status, still_open):
+    """Record a review. `still_open`: PR numbers from the task that are still
+    open. After a `done` review they are held. After a `failed` one they are
+    handed out again, and held only once the app has failed REVIEW_MAX_FAILS
+    times in a row."""
+    state = read_optimize_state()
+    review = state.setdefault(app, {}).setdefault("review", {})
+    fails = 0 if status == "done" else review.get("fails", 0) + 1
+    if status == "done" or fails >= REVIEW_MAX_FAILS:
+        review["held"] = sorted(set(review.get("held", [])) | {int(n) for n in still_open})
+        fails = 0
+    review["fails"] = fails
+    write_optimize_state(state)
+    return 0
+
+
 # ── the schedule ───────────────────────────────────────────────────────────
 # `next` is the one place that decides what runs next. Callers only decide
 # whether it fits: if a repo task (vault/optimize) is too big for what's left,
@@ -327,24 +434,26 @@ def cmd_news_ran():
 
 
 def next_task(skip=(), small=False):
-    """1. an undone Tasks.md item, 2. today's first news batch, 3. an app to
-    optimize, 4. news as filler. `skip`: vault task texts the caller won't
-    run (already tried, or failed too often). `small`: only news fits."""
+    """P1 an undone Tasks.md item, P2 today's first news batch, P3 an app's
+    optimization PRs to review, else an app to optimize, P4 news as filler.
+    `skip`: vault task texts the caller won't run (already tried, or failed
+    too often). `small`: only news fits."""
     if not small:
         try:
             for _, line in undone_tasks(get_content()):
                 text = task_text(line)
                 if text not in skip:
-                    return {"kind": "vault", "text": text}
+                    return {"kind": "vault", "priority": "P1", "text": text}
         except Exception as e:  # vault down: the other tiers still run
-            print(f"note: Tasks.md unreadable ({e}); skipping tier 1", file=sys.stderr)
+            print(f"note: Tasks.md unreadable ({e}); skipping P1", file=sys.stderr)
     if not news_ran_today():
-        return {"kind": "news", "why": "daily"}
+        return {"kind": "news", "priority": "P2", "why": "daily"}
     if not small:
-        t = optimize_task()
+        # Review first: new optimizations wait until the old ones are judged.
+        t = review_task() or optimize_task()
         if t:
-            return t
-    return {"kind": "news", "why": "filler"}
+            return dict(t, priority="P3")
+    return {"kind": "news", "priority": "P4", "why": "filler"}
 
 
 def cmd_next(args):
@@ -375,7 +484,9 @@ def cmd_optimize_list():
     state = read_optimize_state()
     for name in sorted(state):
         e = state[name]
-        print(f"{name}\t{e.get('status')}\tvisits={e.get('visits', 0)}\t{e.get('reason', '')}")
+        held = "".join(f" #{n}" for n in e.get("review", {}).get("held", []))
+        print(f"{name}\t{e.get('status')}\tvisits={e.get('visits', 0)}\t{e.get('reason', '')}"
+              + (f"\theld:{held}" if held else ""))
     return 0
 
 
@@ -392,7 +503,8 @@ def cmd_mark(target):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: tasks_queue.py next [--small] [--skip TEXT]...|news-ran|pick|list|"
-              "mark <text>|news|optimize|optimize-done <app> <status> [note]|optimize-list",
+              "mark <text>|news|optimize|optimize-done <app> <status> [note]|optimize-list|"
+              "review|review-done <app> <done|failed> [open PR number]...",
               file=sys.stderr)
         sys.exit(2)
     if sys.argv[1] == "next":
@@ -411,6 +523,10 @@ if __name__ == "__main__":
         sys.exit(cmd_optimize_list())
     elif sys.argv[1] == "optimize-done" and len(sys.argv) >= 4:
         sys.exit(cmd_optimize_done(sys.argv[2], sys.argv[3], " ".join(sys.argv[4:])))
+    elif sys.argv[1] == "review":
+        sys.exit(cmd_review())
+    elif sys.argv[1] == "review-done" and len(sys.argv) >= 4 and sys.argv[3] in ("done", "failed"):
+        sys.exit(cmd_review_done(sys.argv[2], sys.argv[3], sys.argv[4:]))
     elif sys.argv[1] == "mark" and len(sys.argv) >= 3:
         sys.exit(cmd_mark(sys.argv[2]))
     else:

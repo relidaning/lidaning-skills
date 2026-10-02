@@ -20,8 +20,10 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
   run     Fill the window that is open right now. Work comes from the
           tasks-queue skill when it can be read: an undone vault Tasks.md
           item first (one at a time, committed to master in its repo), then
-          one news batch if today hasn't had one, then optimize tasks (one
-          app under /data/apps each, delivered as a PR), then more news. The
+          one news batch if today hasn't had one, then review tasks (one
+          app's open optimization PRs, verified and merged if they work),
+          then optimize tasks (one app under /data/apps each, delivered as a
+          PR), then more news. The
           queue decides that order (`tasks_queue.py next`); this file only
           decides whether there is quota and whether a task fits. SKILL.md's own tasks are the default, used
           only when the queue can't be read. Start tasks in batches until 5h
@@ -48,7 +50,7 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
 Vault output (written only when tasks run), under the vault root:
   claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task
   claude-maxer/log/YYYY-MM-DD.md    one block per run, one line per task
-  claude-maxer/optimize/<app>.md    one dated report per optimize task
+  claude-maxer/optimize/<app>.md    one dated report per optimize or review task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
 
 Usage: maxer.py tick | run|open|status [--dry-run] | off [--until WHEN] | on
@@ -121,7 +123,7 @@ VAULT_TASK_ROOT = "/data/apps"  # repos a vault task may target
 VAULT_FAILS_PATH = os.path.join(STATE_DIR, "claude-maxer-vault-fails.json")
 MAX_VAULT_ATTEMPTS = 2       # then skip that task until the user edits it
 DEFAULT_VAULT_PCT = 10.0     # first guess at 5h% per vault task; replaced by measurement
-DEFAULT_OPT_PCT = 10.0       # same, per optimize task
+DEFAULT_OPT_PCT = 10.0       # same, per optimize or review task
 
 VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
 
@@ -448,7 +450,7 @@ def read_fails():
 
 
 def next_work(skip=(), small=False):
-    """The queue's next task ({kind: vault|news|optimize, ...}), or None if
+    """The queue's next task ({kind: vault|news|review|optimize, ...}), or None if
     the queue can't be read. `skip`: vault tasks not to hand out."""
     args = ["next"] + (["--small"] if small else [])
     for t in skip:
@@ -465,12 +467,26 @@ def next_work(skip=(), small=False):
 def describe(task):
     if not task:
         return "queue unreadable (SKILL.md defaults would run)"
+    grade = f"{task['priority']} " if task.get("priority") else ""
     if task["kind"] == "vault":
-        return f"vault task: {task['text'][:80]}"
+        return f"{grade}vault task: {task['text'][:80]}"
+    if task["kind"] == "review":
+        return (f"{grade}review {task['app']}: "
+                + " ".join(f"#{p['number']}" for p in task["prs"]) + f" on {task['repo']}")
     if task["kind"] == "optimize":
-        return (f"optimize {task['app']} → " + (f"PR to {task['repo']}" if task["pr"]
-                                               else "local branch only, no PR"))
-    return f"news ({task.get('why')})"
+        return (f"{grade}optimize {task['app']} → " + (f"PR to {task['repo']}" if task["pr"]
+                                                      else "local branch only, no PR"))
+    return f"{grade}news ({task.get('why')})"
+
+
+def pr_state(url):
+    """MERGED | CLOSED | OPEN, or "" if gh can't say."""
+    try:
+        p = subprocess.run(["gh", "pr", "view", url, "--json", "state", "--jq", ".state"],
+                           capture_output=True, text=True, timeout=60)
+        return p.stdout.strip() if p.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 def pr_ok(url, repo):
@@ -577,6 +593,61 @@ def run_optimize_task(task, deadline):
     body = reply or f"_No report: {why}_"
     vault_append(f"claude-maxer/optimize/{app}.md",
                  f"\n## {datetime.fromtimestamp(started):%Y-%m-%d %H:%M} · {status}\n\n{body}\n",
+                 heading=f"# Optimize — {app}\n\n`{path}` · one report per claude-maxer "
+                         f"visit, newest last.\n")
+    return res
+
+
+def run_review_task(task, deadline):
+    """Run one review task with full tools, cwd the app's repo. The worker
+    verifies the app's open optimization PRs in a fresh worktree and merges
+    the ones that work. What happened to each PR is read back from GitHub,
+    never from the reply; PRs still open are reported to the queue, which
+    holds them for the user."""
+    app, path = task["app"], task["path"]
+    started = time.time()
+    res = {"slug": "review", "title": f"review: {app}", "start": started,
+           "items": 0, "cost": 0.0}
+    cmd = ["claude", "-p", task["prompt"], "--model", CFG["model"], "--output-format", "json",
+           "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
+    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    reply = ""
+    try:
+        p = subprocess.run(cmd, cwd=path, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=timeout)
+        out = json.loads(p.stdout)
+        res["cost"] = float(out.get("total_cost_usd") or 0)
+        res["tokens"] = token_usage(out)
+        reply = PRACTICE_BLOCK.sub("", out.get("result") or "").strip()
+    except subprocess.TimeoutExpired:
+        res["error"] = "killed before the window reset"
+    except ValueError:
+        res["error"] = "unparseable output"
+    res["end"] = time.time()
+
+    by_state = {"MERGED": [], "CLOSED": [], "OPEN": []}
+    for pr in task["prs"]:
+        # Unknown counts as open: a PR is never dropped from review on a gh hiccup.
+        by_state.get(pr_state(pr["url"]), by_state["OPEN"]).append(pr["number"])
+    nums = lambda ns: " ".join(f"#{n}" for n in ns)  # noqa: E731
+    summary = " · ".join(f"{label} {nums(ns)}" for label, ns in (
+        ("merged", by_state["MERGED"]), ("closed", by_state["CLOSED"]),
+        ("held", by_state["OPEN"])) if ns)
+    if not res.get("error") and not re.search(r"^REVIEW:\s*done", reply, re.M):
+        res["error"] = "no REVIEW line in the reply"
+    if res.get("error"):
+        res["error"] += f" ({summary.replace('held', 'still open')})"
+    res["outcome"] = summary
+    queue_call("review-done", app, "failed" if res.get("error") else "done",
+               *map(str, by_state["OPEN"]))
+    if os.path.isdir(task.get("worktree", "")):
+        subprocess.run(["git", "-C", path, "worktree", "remove", "--force", task["worktree"]],
+                       capture_output=True, timeout=60)
+    subprocess.run(["git", "-C", path, "worktree", "prune"], capture_output=True, timeout=60)
+    body = reply or f"_No report: {res.get('error')}_"
+    vault_append(f"claude-maxer/optimize/{app}.md",
+                 f"\n## {datetime.fromtimestamp(started):%Y-%m-%d %H:%M} · review · "
+                 f"{res.get('error') or summary}\n\n{body}\n",
                  heading=f"# Optimize — {app}\n\n`{path}` · one report per claude-maxer "
                          f"visit, newest last.\n")
     return res
@@ -945,7 +1016,7 @@ def cmd_run(dry_run):
         print(f"news tasks ({src}):", [t[1] for t in news])
         if task and task["kind"] == "vault":
             print(VAULT_PROMPT.format(task=task["text"], root=VAULT_TASK_ROOT))
-        elif task and task["kind"] == "optimize":
+        elif task and task["kind"] in ("review", "optimize"):
             print(task["prompt"][:1500])
         else:
             print(build_prompt(news[0][2], [])[:900])
@@ -986,11 +1057,11 @@ def cmd_run(dry_run):
         skip = sorted(tried | {t for t, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS})
         task = next_work(skip)
         if task and ((task["kind"] == "vault" and room < per_vault)
-                     or (task["kind"] == "optimize" and room < per_opt)):
+                     or (task["kind"] in ("review", "optimize") and room < per_opt)):
             task = next_work(skip, small=True)
         task = task or {"kind": "news", "why": "queue unreadable"}
         vt = task.get("text") if task["kind"] == "vault" else None
-        ot = task if task["kind"] == "optimize" else None
+        ot = task if task["kind"] in ("review", "optimize") else None
         if vt:
             tried.add(vt)  # one attempt per run; a failure retries next run
             results = [run_vault_task(vt, deadline)]
@@ -999,7 +1070,8 @@ def cmd_run(dry_run):
             if delta > 0:
                 per_vault = delta
         elif ot:
-            results = [run_optimize_task(ot, deadline)]
+            results = [(run_review_task if ot["kind"] == "review" else run_optimize_task)(
+                ot, deadline)]
             u = fresh_usage()
             delta = (u["five_pct"] or 0) - before
             if delta > 0 and not results[0].get("outcome", "").startswith("skip"):
@@ -1031,7 +1103,7 @@ def cmd_run(dry_run):
                 tries = f" (attempt {r['attempt']}/{MAX_VAULT_ATTEMPTS})" if "attempt" in r else ""
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed{tries}: "
                         f"{r['error']} · {cost}\n")
-            elif r["slug"] == "optimize":
+            elif r["slug"] in ("optimize", "review"):
                 tasks_done += 1
                 app = r["title"].split(": ", 1)[1]
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['outcome']} · "

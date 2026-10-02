@@ -5,10 +5,11 @@ description: >
   tasks", "task list", "Tasks.md", "what's next to do", "any undone tasks",
   "leverage the limitation", "use up my limit", "spare quota/usage", "what can
   Claude work on", or "tasks-queue". Owns the user's priority queue of work:
-  the vault's `Tasks.md` is the highest-priority tier, then one daily news
-  batch, then optimizing the user's apps under /data/apps, then more news.
-  Decides what runs next (`tasks_queue.py next`), and lists, picks and
-  checks off items via `list|pick|mark|news|optimize`. An unattended caller
+  four explicit grades, P1 the vault's `Tasks.md`, P2 one daily news batch,
+  P3 optimizing the user's apps under /data/apps and reviewing/merging those
+  optimizations, P4 more news. Decides what runs next (`tasks_queue.py
+  next`), and lists, picks and checks off items via
+  `list|pick|mark|news|optimize|review`. An unattended caller
   (claude-maxer) decides only when there is quota and asks it for work.
 ---
 
@@ -20,14 +21,18 @@ is quota to spend; see [Scheduling](#scheduling).
 
 ## Priority
 
-| Order | Source | Done when |
+Four grades. `next` puts the grade in its output (`"priority": "P1"`).
+
+| Grade | Source | Done when |
 |---|---|---|
-| 1 (highest) | undone items in the vault's `Tasks.md` | `mark` checks it off |
-| 2 | one [news](#news-tasks) batch, the first time the queue is drained each day | once per day |
-| 3 | [Optimize tasks](#optimize-tasks): one app under `/data/apps` per task | never; apps rotate, least recently visited first |
-| 4 (lowest) | more [news tasks](#news-tasks), as filler | never; they rotate and repeat |
+| **P1** (highest) | undone items in the vault's `Tasks.md`, in file order | `mark` checks it off |
+| **P2** | one [news](#news-tasks) batch, the first time the queue is drained each day | once per day |
+| **P3** | first [Review tasks](#review-tasks): an app's open optimization PRs are checked and merged if they work; then [Optimize tasks](#optimize-tasks): one app under `/data/apps` per task | never; apps rotate |
+| **P4** (lowest) | more [news tasks](#news-tasks), as filler | never; they rotate and repeat |
 
 - A `Tasks.md` task always goes first, whenever there is one.
+- Inside P3, review goes before optimize: no app gets a new optimization
+  while any app still has optimization PRs nobody has looked at.
 - News gets one early slot per day (the daily digest stays fresh), then
   drops below optimization. The queue remembers the day in
   `~/.claude/state/tasks-queue-news-day.json`; the caller reports it with
@@ -60,7 +65,8 @@ note's frontmatter across rewrites.
 ```bash
 python3 tasks_queue.py next [--small] [--skip "<vault task>"]...
                                         # the next task as JSON: {kind: vault, text}
-                                        # | {kind: news, why: daily|filler} | {kind: optimize, ...}
+                                        # | {kind: news, why: daily|filler} | {kind: review, ...}
+                                        # | {kind: optimize, ...}, each with priority: P1..P4
 python3 tasks_queue.py news-ran         # today's news batch has started
 python3 tasks_queue.py pick             # first undone task text; exit 1 if none
 python3 tasks_queue.py list             # all undone tasks as "lineno<TAB>text"
@@ -69,7 +75,10 @@ python3 tasks_queue.py news             # news tasks as JSON [{title, prompt}]
 python3 tasks_queue.py optimize         # next app as JSON {app, path, base, branch, worktree,
                                         #   repo, remote, pr, prompt}; exit 1 if none
 python3 tasks_queue.py optimize-done <app> <skip|optimized|findings|failed> [note]
-python3 tasks_queue.py optimize-list    # every app visited so far, with its status
+python3 tasks_queue.py optimize-list    # every app visited so far, with its status and held PRs
+python3 tasks_queue.py review           # next app with unreviewed opt/ PRs as JSON {app, path, base,
+                                        #   repo, remote, prs, worktree, prompt}; exit 1 if none
+python3 tasks_queue.py review-done <app> <done|failed> [PR numbers still open]...
 ```
 
 `mark` matches the task's exact stripped text, so pass back what `pick`
@@ -94,7 +103,7 @@ marking it would split one user item into two checked lines (fixed
 **This queue owns the order; the caller owns the clock.** `next` applies
 the [Priority](#priority) table. The caller (claude-maxer) decides whether
 there is quota, and whether the returned task fits in what's left of the
-window: if a repo task (vault/optimize) is too big, it asks again with
+window: if a repo task (vault/review/optimize) is too big, it asks again with
 `--small` and gets news. It passes `--skip` for vault tasks it won't run
 (already tried this run, or failed too often). Two rules from past runs:
 
@@ -108,7 +117,7 @@ window: if a repo task (vault/optimize) is too big, it asks again with
 
 ## Optimize tasks
 
-Order 3. Each task takes **one app** under `/data/apps`, reads its code,
+P3, after review. Each task takes **one app** under `/data/apps`, reads its code,
 finds what is worth improving (memory, CPU, latency, stability,
 power-efficiency, startup time, disk/log growth, or whatever else matters
 for that app), fixes the best of it, and reports what it did.
@@ -136,6 +145,8 @@ for that app), fixes the best of it, and reports what it did.
   local branch has a new commit).
 - Rotation means each real app is revisited later with fresh eyes; the
   previous reports in the vault note are the worker's starting point.
+- The optimize worker never merges. Merging is the [review](#review-tasks)
+  task's job, in a separate session that didn't write the change.
 
 ```optimize-prompt
 You are running unattended. Your job: make one of the user's apps better where it
@@ -206,9 +217,119 @@ BRANCH: {branch} | none
 PR: <PR url> | none
 ```
 
+## Review tasks
+
+P3, ahead of optimize. The optimize tier leaves every fix as an open PR, and
+nothing else merges them: by 2026-10-02 there were about 45 open across 11
+repos and one merged. A review task takes **one app's open `opt/` PRs** (at
+most 3 per task, oldest first), checks whether each optimization really
+works, and merges the ones that do.
+
+- `review` picks an app that had an optimize visit since it was last
+  looked at and has open PRs from `opt/` branches that no review has judged
+  yet. Only your own GitHub repos (`relidaning/*`) qualify: jellyfin-web's
+  work is a local branch with no PR, so it is never reviewed.
+- Each PR gets one of three verdicts. **merge**: it builds, its tests pass,
+  and the claim was reproduced. **hold**: it can't be proven here, or it
+  touches something only you should decide (the list is in the prompt).
+  **close**: superseded, no effect, or wrong.
+- Merging is a squash merge on GitHub (`gh pr merge --repo`), so the app's
+  own checkout and current branch are never touched, and one optimization
+  is one commit on the base branch that `git revert` undoes. Nothing is
+  redeployed: the report says which merges need a redeploy.
+- **A held PR waits for you.** The caller checks each PR's real state with
+  `gh` after the session, never the worker's word, and reports the ones
+  still open with `review-done`. They are stored as `review.held` in
+  `~/.claude/state/tasks-queue-optimize.json` and not handed out again.
+  Merge or close them yourself, or delete the app's `review` entry to have
+  them reviewed again.
+- A session that dies (timeout, no report) is retried once; after 2
+  failures in a row its PRs are held too.
+- The report is appended to the same vault note as the optimize reports,
+  `claude-maxer/optimize/<app>.md`, as a `review` section.
+
+```review-prompt
+You are running unattended. Earlier unattended runs optimized the user's app
+`{app}` and left each change as an open pull request on {repo}. Nobody has
+checked them. Your job: find out whether each optimization really works, merge
+the ones that do, and report. The app is at `{path}`, and you are in that
+directory.
+
+Pull requests to review now, oldest first:
+{pr_list}
+
+Other open optimization PRs in this repo, for context only (do not act on them):
+{other_prs}
+
+1. Get the context. Read the app's README and CLAUDE.md, and the earlier reports
+   at `/data/nextcloud_client/obsidian/lidaning/claude-maxer/optimize/{app}.md`.
+   Read each PR's description and its whole diff
+   (`gh pr view <n> --repo {repo}`, `gh pr diff <n> --repo {repo}`).
+2. Work in a separate worktree, never in `{path}` itself:
+       git -C {path} fetch {remote} {base}
+       git -C {path} worktree add --detach {worktree} FETCH_HEAD
+   For each PR in turn, inside `{worktree}`:
+       git fetch {remote} {base} && git checkout --detach FETCH_HEAD
+       git fetch {remote} pull/<n>/head && git merge --no-edit FETCH_HEAD
+   so you test the change on top of the current `{base}`, including the PRs
+   you merged a moment ago.
+3. Verify it. Run the app's lint/typecheck/build/test steps for what the PR
+   touches. Then check the PR's own claim: measure the same thing with and
+   without the change in a local run from the worktree (timings, RSS, query
+   plans, image size, a reproduced crash that no longer happens). A claim you
+   could not reproduce is not verified, however plausible the diff looks.
+   Never invent numbers.
+4. Give each PR one verdict:
+   - merge: it builds, its tests pass, and you reproduced the claim, or the
+     change is a plain bug fix you exercised in a local run.
+   - hold: anything you could not verify locally; anything that changes how
+     passwords, secrets, keys, authentication or encryption are handled; any
+     change to stored user data or its schema; any change to how a running
+     service is deployed that only a redeploy can prove (compose files,
+     images, cache/database/locking backends, cron, systemd units); anything
+     that needs a decision from the user; anything that depends on a PR you
+     are holding; and anything you are unsure about. When in doubt, hold.
+   - close: superseded by another PR (say which), no measurable effect, or
+     wrong.
+   If the merge in step 2 conflicts: when another PR already contains the same
+   change, close this one as superseded. When the fix-up is mechanical, merge
+   `{base}` into the PR's branch, resolve, push that `opt/` branch with a
+   normal push, and carry on. Otherwise hold.
+5. Act on the verdict, and leave the evidence on the PR:
+   - merge: `gh pr comment <n> --repo {repo} --body "<verdict and evidence>"`,
+     then `gh pr merge <n> --repo {repo} --squash`. Always pass `--repo`, and
+     never `--delete-branch` or `--admin`.
+   - hold: comment with what you checked and exactly what is missing.
+   - close: `gh pr close <n> --repo {repo} --comment "<reason>"`.
+
+Rules:
+- Merging is not deploying. Do not restart, redeploy or rebuild a running
+  service, container or installed command, and don't edit crontab, systemd
+  units, or any file outside `{worktree}`. Never check out, pull or change
+  anything in `{path}` itself.
+- Never push to `{base}` directly, never force-push, never merge a PR that is
+  not in the review list above, and never merge with failing checks.
+- No sudo, no deleting user data.
+
+Reply with a report in exactly this shape (it is filed verbatim into the vault):
+
+### #<n> <title>: merged | held | closed
+What the PR claims, what you ran, and the result as before -> after (or "not
+reproduced: <why>"). For a merge: whether it needs a redeploy to take effect.
+For a hold: what the user has to check or decide.
+
+(one such section per PR)
+
+### Left for the user
+Redeploys needed, PRs held and why, anything else. "Nothing" if so.
+
+End with exactly this line:
+REVIEW: done
+```
+
 ## News tasks
 
-Order 2 once a day, then order 4.
+P2 once a day, then P4.
  Each `### Title` is one task; its body says *what* to collect, and
 the caller adds output rules (numbered, linked items, no invented URLs).
 They rotate in order across runs. Add, remove or reword freely.
