@@ -25,3 +25,5 @@ skills:
     path: skills/tasks-queue
   - name: skill-bench
     path: skills/skill-bench
+  - name: git-rules
+    path: skills/git-rules

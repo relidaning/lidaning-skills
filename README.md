@@ -16,6 +16,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | `claude-maxer` | project | Documents/manages the keep-alive pings + opportunistic-work loop for Pro/Max limits. |
 | `nextcloud-paper` | project | Operate the self-hosted Nextcloud via MCP (WebDAV): list, read, write, move, search files. |
 | `skill-bench` | project | Benchmark a skill: frozen, versioned trigger + behavior suites; headless trials; F1, rubric scores, pass@k, CIs, run history. |
+| `git-rules` | global | Personal git/GitHub rules: delete a branch once its PR is merged, repo settings, session notes. New rules are added here instead of the global CLAUDE.md. |
 
 ## Quick start
 

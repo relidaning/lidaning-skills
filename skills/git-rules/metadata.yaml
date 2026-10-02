@@ -1,0 +1,4 @@
+name: git-rules
+description: The user's personal rules for git and GitHub repositories (branch cleanup after a merged PR, repo settings, session notes), kept in one portable place instead of the global CLAUDE.md.
+scope: global
+tags: [git, github, branches, pull-requests, rules]
