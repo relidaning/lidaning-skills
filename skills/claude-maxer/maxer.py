@@ -875,6 +875,7 @@ def run_task(slug, title, prompt, day, deadline, lookback=1):
         return res
     if docs:
         store_papers(docs)
+        res["pdfs"] = save_pdfs(docs)
     res["items"] = len(ENTRY.findall(body))
     return res
 
@@ -986,6 +987,126 @@ def store_papers(docs):
         rag("rag_ingest", {"documents": docs, "collection": PAPERS_COLLECTION})
     except Exception as e:
         log("papers_memory", error=f"store failed: {e}"[:200])
+
+
+# ── paper PDFs ─────────────────────────────────────────────────────────────
+# Each newly proposed paper with an arXiv ID is downloaded to ~/papers/ and
+# uploaded to Nextcloud papers/, with the same file naming as the paper-fetch
+# skill. Plain HTTP from this process, since the news session has only web
+# tools. Best-effort: a failure is logged and never fails the task. Papers
+# without an arXiv ID are skipped, and no summary note is written (that needs
+# a model; paper-fetch does it on request).
+
+PAPERS_DIR = os.path.expanduser("~/papers")
+NC_PAPERS_DIR = "papers"  # the one folder nextcloud-paper's allowlist permits
+NC_ENV_FILE = os.path.expanduser("~/.zshrc.local")
+PDF_MIN_BYTES = 10 * 1024  # arXiv can serve an HTML error page with HTTP 200
+PDF_TIMEOUT_S = 120
+
+
+def nextcloud_env():
+    """(host, user, password) from ~/.zshrc.local, which cron never sources
+    and which holds the app password; the environment only fills gaps (a
+    shell's own NEXTCLOUD_* values were stale and got a 401, 2026-10-04)."""
+    import shlex
+    env = {k: os.environ.get(k) for k in
+           ("NEXTCLOUD_HOST", "NEXTCLOUD_USERNAME", "NEXTCLOUD_PASSWORD")}
+    try:
+        with open(NC_ENV_FILE) as f:
+            for m in re.finditer(r"^\s*export\s+(NEXTCLOUD_\w+)=(.*)$", f.read(), re.M):
+                if m.group(1) in env:
+                    env[m.group(1)] = (shlex.split(m.group(2)) or [""])[0]
+    except OSError:
+        pass
+    if not all(env.values()):
+        raise RuntimeError("NEXTCLOUD_HOST/_USERNAME/_PASSWORD not set")
+    return env["NEXTCLOUD_HOST"].rstrip("/"), env["NEXTCLOUD_USERNAME"], env["NEXTCLOUD_PASSWORD"]
+
+
+def arxiv_titles(ids):
+    """{arxiv id: real title}, one API call for all ids. Empty on failure:
+    the caller falls back to the note's headline."""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    url = (f"https://export.arxiv.org/api/query?id_list={','.join(ids)}"
+           f"&max_results={len(ids)}")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            root = ET.fromstring(r.read())
+    except Exception as e:
+        log("papers_pdf", error=f"title lookup failed: {e}"[:200])
+        return {}
+    titles = {}
+    for e in root.findall("a:entry", ns):
+        arxid = re.sub(r"v\d+$", "", (e.findtext("a:id", "", ns)).split("/abs/")[-1])
+        title = " ".join((e.findtext("a:title", "", ns)).split())
+        if title:
+            titles[arxid] = title
+    return titles
+
+
+def pdf_name(arxid, title):
+    title = re.sub(r'[/\\?*"<>|]', "", title.replace(": ", " - ").replace(":", " "))
+    return f"{arxid} - {' '.join(title.split())[:150]}.pdf"
+
+
+def nextcloud_put(local, name):
+    """Upload unless a file of that name is already there."""
+    import base64
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    host, user, password = nextcloud_env()
+    url = (f"{host}/remote.php/dav/files/{urllib.parse.quote(user)}/"
+           f"{NC_PAPERS_DIR}/{urllib.parse.quote(name)}")
+    auth = {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+    # Nextcloud is local; the xray proxy can't reach it.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        opener.open(urllib.request.Request(url, method="HEAD", headers=auth), timeout=30)
+        return
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    with open(local, "rb") as f:
+        opener.open(urllib.request.Request(url, data=f.read(), method="PUT", headers={
+            **auth, "Content-Type": "application/pdf"}), timeout=PDF_TIMEOUT_S)
+
+
+def save_pdfs(docs):
+    """Download and upload the PDFs of `docs` (the new papers). Returns
+    {"saved": n, "failed": n, "skipped": n}; skipped = no arXiv ID."""
+    import glob
+    import urllib.request
+    ids = {d["id"][6:]: d["metadata"]["title"] for d in docs if d["id"].startswith("arxiv:")}
+    out = {"saved": 0, "failed": 0, "skipped": len(docs) - len(ids)}
+    if not ids:
+        return out
+    titles = arxiv_titles(list(ids))
+    os.makedirs(PAPERS_DIR, exist_ok=True)
+    for arxid, headline in ids.items():
+        try:
+            have = glob.glob(os.path.join(PAPERS_DIR, glob.escape(arxid) + " - *.pdf"))
+            local = have[0] if have else os.path.join(
+                PAPERS_DIR, pdf_name(arxid, titles.get(arxid, headline)))
+            if not have:
+                req = urllib.request.Request(f"https://arxiv.org/pdf/{arxid}",
+                                             headers={"User-Agent": "claude-maxer/1.0"})
+                with urllib.request.urlopen(req, timeout=PDF_TIMEOUT_S) as r:
+                    data = r.read()
+                if not data.startswith(b"%PDF") or len(data) < PDF_MIN_BYTES:
+                    raise RuntimeError(f"not a PDF ({len(data)} bytes)")
+                with open(local + ".part", "wb") as f:
+                    f.write(data)
+                os.replace(local + ".part", local)
+                time.sleep(3)  # be polite to arXiv
+            nextcloud_put(local, os.path.basename(local))
+            out["saved"] += 1
+        except Exception as e:
+            out["failed"] += 1
+            log("papers_pdf", id=arxid, error=str(e)[:200])
+    return out
 
 
 # ── commands ───────────────────────────────────────────────────────────────
@@ -1114,8 +1235,14 @@ def cmd_run(dry_run):
                         f"in {r['repo']}, checked off in Tasks.md · {cost}\n")
             else:
                 tasks_done += 1
+                pdfs = ""
+                if r.get("pdfs"):
+                    p = r["pdfs"]
+                    pdfs = f"· {p['saved']} PDFs in Nextcloud papers/ "
+                    if p["failed"] or p["skipped"]:
+                        pdfs += f"({p['failed']} failed, {p['skipped']} without an arXiv ID) "
                 line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
-                        f"· {cost}\n")
+                        f"{pdfs}· {cost}\n")
             vault_append(note, line)
             log("task", **r)
         vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(results)}: +{delta:.0f}pp)\n")
