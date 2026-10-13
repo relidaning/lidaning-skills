@@ -334,6 +334,14 @@ P2 once a day, then P4.
 the caller adds output rules (numbered, linked items, no invented URLs).
 They rotate in order across runs. Add, remove or reword freely.
 
+**World : domestic = 6 : 4** (the user's choice, 2026-10-13) in the four
+science/tech/AI tasks: AI, Big tech, Dev & open source, Science & space.
+"Domestic" is mainland China, searched in Chinese from Chinese-language
+outlets. Before this, domestic stories came only from `China tech`, one of
+eight rotating tasks (2 sections in 8 days), and that one read mostly
+English-language coverage (SCMP). The split is written into each prompt,
+because a task's prompt is only the text under its own `### Title`.
+
 A title ending in `(daily)` is pinned instead: it runs in every day's first
 batch, never as filler, so it produces exactly one section a day. Its
 prompt also gets the past 7 days' titles to skip, not just today's.
@@ -350,10 +358,10 @@ skipped). See claude-maxer's `maxer.py` (`PAPER_TASKS`, `save_pdfs`).
 Find the 5 AI, machine learning and deep learning research papers most worth reading right now. Each must be either very important (a major lab's model or technique report, or a result the field is actively building on) or clearly trending in the last 7 days (high on Hugging Face Daily Papers, alphaXiv or arXiv trending, or widely discussed on X, Reddit or Hacker News). Prefer papers from the last 2 weeks; include an older paper only if it newly became important. At least one of the 5, listed last, must instead be a foundational paper of any year that shaped how AI, machine learning or deep learning developed (for example backpropagation, AlexNet, dropout, Adam, the Transformer, scaling laws); vary the era and area from day to day, and for it the "Chosen because" sentence names what later work it inspired. Link the arXiv abstract page (arxiv.org/abs/…) when there is one, otherwise the paper's official page. Use the first author's lab or the org as Source and the submission date as the date. The first sentence says what the paper does; the second starts with "Chosen because" and gives the reason with its evidence (e.g. upvote count, who released it, or who is discussing it).
 
 ### AI
-Find the 10 most important stories from the last 48 hours on AI and machine learning: model releases, research, AI companies, policy.
+Find the 10 most important stories from the last 48 hours on AI and machine learning: model releases, research, AI companies, policy. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: Chinese labs and companies (DeepSeek, Alibaba, Tencent, ByteDance, Baidu, Zhipu, Moonshot, Huawei and peers), Chinese AI research and policy. For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 机器之心, 量子位, 36氪, 财新, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Big tech
-Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation.
+Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: China's big tech (Huawei, Alibaba, Tencent, ByteDance, Xiaomi, Baidu, Meituan, BYD and peers). For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 36氪, 虎嗅, 财新, 第一财经, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### World
 Find the 2 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
@@ -362,10 +370,10 @@ Find the 2 most important breaking world news stories from the last 48 hours: po
 Find the 10 most important cybersecurity stories from the last 48 hours: major breaches, actively exploited vulnerabilities, security research.
 
 ### Dev & open source
-Find the 10 most important stories from the last 48 hours on software development and open source: languages, frameworks, dev tools, notable releases.
+Find the 10 most important stories from the last 48 hours on software development and open source: languages, frameworks, dev tools, notable releases. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: Chinese open-source projects, developer tools and platforms (e.g. OpenHarmony, openEuler, TiDB, PaddlePaddle, Gitee, releases from Chinese companies). For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 开源中国 OSCHINA, InfoQ 中国, 思否, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Science & space
-Find the 10 most important science and space stories from the last 48 hours: research breakthroughs, space missions, health and medicine.
+Find the 10 most important science and space stories from the last 48 hours: research breakthroughs, space missions, health and medicine. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: research from Chinese universities and CAS institutes, China's space programme (CNSA, Tiangong, Chang'e, commercial launchers), health and medicine in China. For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 科技日报, 中国科学报/科学网, 新华社, 澎湃新闻, 财新) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Markets
 Find the 10 most important markets and economy stories from the last 48 hours: central banks, major market moves, macro data, big deals.

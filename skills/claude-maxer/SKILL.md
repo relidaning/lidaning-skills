@@ -164,10 +164,10 @@ of linked items, no invented URLs, skip items already in today's note), so a
 prompt only needs to say *what* to collect. Add, remove or reword freely.
 
 ### AI
-Find the 10 most important stories from the last 48 hours on AI and machine learning: model releases, research, AI companies, policy.
+Find the 10 most important stories from the last 48 hours on AI and machine learning: model releases, research, AI companies, policy. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: Chinese labs and companies (DeepSeek, Alibaba, Tencent, ByteDance, Baidu, Zhipu, Moonshot, Huawei and peers), Chinese AI research and policy. For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 机器之心, 量子位, 36氪, 财新, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Big tech
-Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation.
+Find the 10 most important stories from the last 48 hours on big tech (Apple, Google, Microsoft, Meta, Amazon, Nvidia, Tesla and peers): products, business, regulation. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: China's big tech (Huawei, Alibaba, Tencent, ByteDance, Xiaomi, Baidu, Meituan, BYD and peers). For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 36氪, 虎嗅, 财新, 第一财经, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### World
 Find the 2 most important breaking world news stories from the last 48 hours: politics, conflicts, disasters, major international events.
@@ -176,10 +176,10 @@ Find the 2 most important breaking world news stories from the last 48 hours: po
 Find the 10 most important cybersecurity stories from the last 48 hours: major breaches, actively exploited vulnerabilities, security research.
 
 ### Dev & open source
-Find the 10 most important stories from the last 48 hours on software development and open source: languages, frameworks, dev tools, notable releases.
+Find the 10 most important stories from the last 48 hours on software development and open source: languages, frameworks, dev tools, notable releases. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: Chinese open-source projects, developer tools and platforms (e.g. OpenHarmony, openEuler, TiDB, PaddlePaddle, Gitee, releases from Chinese companies). For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 开源中国 OSCHINA, InfoQ 中国, 思否, IT之家) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Science & space
-Find the 10 most important science and space stories from the last 48 hours: research breakthroughs, space missions, health and medicine.
+Find the 10 most important science and space stories from the last 48 hours: research breakthroughs, space missions, health and medicine. Make 6 of the 10 world stories and 4 domestic (mainland China) ones: research from Chinese universities and CAS institutes, China's space programme (CNSA, Tiangong, Chang'e, commercial launchers), health and medicine in China. For the domestic ones, search in Chinese and use Chinese-language outlets (e.g. 科技日报, 中国科学报/科学网, 新华社, 澎湃新闻, 财新) rather than foreign coverage of China; keep headlines and summaries in English. List the world stories first, then the domestic ones. If the window has fewer than 4 real domestic stories, fill the rest with world stories instead of padding.
 
 ### Markets
 Find the 10 most important markets and economy stories from the last 48 hours: central banks, major market moves, macro data, big deals.
