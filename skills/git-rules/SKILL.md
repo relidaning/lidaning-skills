@@ -2,9 +2,9 @@
 name: git-rules
 description: >
   The user's personal rules for git and GitHub repositories. Activate BEFORE
-  acting whenever the work touches a repository's branches, pull requests or
-  GitHub settings: creating or deleting a branch, opening, merging or closing a
-  PR, cleaning up after a merge, creating a new GitHub repo, pushing session
+  acting whenever the work touches a repository's commits, branches, pull
+  requests or GitHub settings: committing changes ("commit this", "commit the
+  work"), creating or deleting a branch, opening, merging or closing a PR, cleaning up after a merge, creating a new GitHub repo, pushing session
   notes (SESSION.md, CLAUDE.md), or changing repo settings. Also activate when
   the user states a new git/GitHub habit or says "remember this rule", "add
   this to my git rules", "make it a rule for all my repos" — new rules are
@@ -65,6 +65,19 @@ done
 Session logs and agent memory files kept in a repo's root (`SESSION.md`, `CLAUDE.md`, …) are committed and pushed along with the work, never left as uncommitted changes. Unattended tasks stop without committing when they find uncommitted work in a repo that they didn't make, so a dirty notes file blocks them.
 
 Before pushing, read the diff and leave out anything sensitive (secrets, tokens, credentials, personal data), especially in public repos. Skip a notes file only when another live session is clearly still writing it.
+
+### 4. A request to commit is also a request to push
+
+When the user asks for a commit, push it to the remote in the same step, without asking first. A commit that stays local is not backed up and does not reach the user's other machines.
+
+```bash
+git push                      # the branch already tracks a remote branch
+git push -u origin <branch>   # first push of a new branch
+```
+
+Push only the current branch, and never force-push under this rule. If the push is rejected (the remote has commits the local branch lacks) or fails, stop and report it; don't rebase, merge or force on your own.
+
+Don't push when the user says so ("commit only", "don't push"), when the repo has no remote, or when the task's own instructions forbid pushing (an unattended worker told to commit but never push).
 
 ## Adding or changing a rule
 
