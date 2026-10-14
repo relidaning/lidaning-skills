@@ -72,6 +72,8 @@ The `memory-orchestrate` skill (renamed from `coding-orchestrate` 2026-09-29) is
 
 These are skill-managed, not hand-edited. When in doubt, invoke `/memory-orchestrate`.
 
+The vault's root note `Claude Sessions.md` is not one of these and no skill here writes it: it is a separate `SessionEnd` hook from the dotfiles repo (`~/.claude/hooks/log-claude-vault.sh` → `log-session-vault.py`, source in `/data/apps/dotfiles/claude/hooks/`, plus a terminal-close fallback in `.zshrc`) that appends one line per ended session, `/clear` included (traced 2026-10-13).
+
 Note: `.claude/` is gitignored, so the files under it are local-only and not versioned — they can silently disappear (e.g. `TODO.md` was lost when moved under `.claude/` in commit 65d311e4 and later had to be rebuilt from `git show 65d311e4^:TODO.md`). If one goes missing, check git history from before the move.
 
 **`.claude/TODO.md` is deprecated — the user's only authoritative task list is the Obsidian vault's Tasks note.** Deleted 2026-08-12 at the user's explicit request ("other tasks you proposed are sort of non-sense") after it had accumulated vague/manual-testing items claude-maxer's TODO-triage runs kept correctly declining to act on. Do not recreate it or propose/track discovered tasks anywhere outside the vault's Tasks note (owned by `tasks-queue`; since 2026-09-27 claude-maxer's `run` drains it first, committing each task to master in its repo) — since 2026-09-29 the skill itself no longer has a TODO file (`todos.md` removed, its trigger for mid-conversation tasks dropped).
