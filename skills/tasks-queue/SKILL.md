@@ -9,8 +9,11 @@ description: >
   P3 optimizing the user's apps under /data/apps and reviewing/merging those
   optimizations, P4 more news. Decides what runs next (`tasks_queue.py
   next`), and lists, picks and checks off items via
-  `list|pick|mark|news|optimize|review`. An unattended caller
+  `list|pick|mark|news|optimize|review`. Also activate when the user wants
+  to switch a queue task on or off (optimize, review, news, vault, or every
+  scheduling/consuming task at once). An unattended caller
   (claude-maxer) decides only when there is quota and asks it for work.
+argument-hint: "[tasks] [on|off <task|scheduling|consuming|all>... [--until T]] [model <task|type|all>... <id|default>]"
 ---
 
 # tasks-queue
@@ -19,16 +22,60 @@ The user's priority queue of work. **It decides what runs next**
 (`next`) and checks vault tasks off. The caller decides only *when* there
 is quota to spend; see [Scheduling](#scheduling).
 
+## Arguments (`/tasks-queue <args>`)
+
+When the skill is invoked with arguments, they are a command: run the
+matching line in **one** Bash call with the script's absolute path
+(`python3 /data/apps/lidaning-skills/skills/tasks-queue/tasks_queue.py <args>`;
+the installed skill directory has only the `.md` files), show its output,
+and do nothing else. `--until T` passes through unchanged (`2h`, `3d`,
+`18:00`, `2026-10-20`).
+
+| arguments | runs |
+|---|---|
+| `tasks` | `tasks_queue.py tasks` (every task: grade, task_type, on/off) |
+| `off <name>... [--until T]` | `tasks_queue.py off <name>... [--until T]` |
+| `on <name>...` | `tasks_queue.py on <name>...` |
+| `model <name>... <id\|default>` | `tasks_queue.py model <name>... <id\|default>` (the model the task runs on) |
+
+`<name>` is a task (`vault`, `news-daily`, `review`, `optimize`,
+`news-filler`), a task_type (`scheduling`, `consuming`) or `all`; several
+can follow one `on`/`off`. Anything else is not a command: treat it as a
+normal request.
+
 ## Priority
 
 Four grades. `next` puts the grade in its output (`"priority": "P1"`).
 
-| Grade | Source | Done when |
-|---|---|---|
-| **P1** (highest) | undone items in the vault's `Tasks.md`, in file order | `mark` checks it off |
-| **P2** | one [news](#news-tasks) batch, the first time the queue is drained each day | once per day |
-| **P3** | first [Review tasks](#review-tasks): an app's open optimization PRs are checked and merged if they work; then [Optimize tasks](#optimize-tasks): one app under `/data/apps` per task | never; apps rotate |
-| **P4** (lowest) | more [news tasks](#news-tasks), as filler | never; they rotate and repeat |
+| Grade | Task (switch name) | task_type | Default model | Source | Done when |
+|---|---|---|---|---|---|
+| **P1** (highest) | `vault` | scheduling | Opus 5.5 | undone items in the vault's `Tasks.md`, in file order | `mark` checks it off |
+| **P2** | `news-daily` | scheduling | Sonnet 5.5 | one [news](#news-tasks) batch, the first time the queue is drained each day | once per day |
+| **P3** | `review`, then `optimize` | consuming | Opus 5.5, Sonnet 5.5 | first [Review tasks](#review-tasks): an app's open optimization PRs are checked and merged if they work; then [Optimize tasks](#optimize-tasks): one app under `/data/apps` per task | never; apps rotate |
+| **P4** (lowest) | `news-filler` | consuming | Sonnet 5.5 | more [news tasks](#news-tasks), as filler | never; they rotate and repeat |
+
+**task_type** (the user's concept, 2026-10-15): a **scheduling** task is
+work to do once (a vault item, the day's news batch); a **consuming** task
+never finishes and exists to use up spare subscription quota. `next`
+returns it as `"type"`.
+
+**Models** (2026-10-15): each task names the model it runs on, and `next`
+returns it as `"model"`; claude-maxer's own `model` setting is only the
+fallback. News is searching and summarizing, so Sonnet; vault and review
+commit or merge unattended, so Opus; optimize only opens a PR that review
+checks, so Sonnet. Change one with `tasks_queue.py model optimize
+claude-opus-5-5` (`default` restores it). Haiku is refused, by the user's
+decision after a 2026-10-15 benchmark where Haiku skipped skills it should
+have called (claude-maxer triggered 0/30). Overrides are kept in
+`~/.claude/state/tasks-queue-models.json`.
+
+**Switches.** Every task can be switched off (`tasks_queue.py off
+optimize`, or `off consuming` for all of one type, optionally `--until 3d`)
+and `next` passes over it. Added 2026-10-15 because quota ran short while
+optimize and review kept running. State: `~/.claude/state/tasks-queue-switches.json`
+(lists only what is off; an expired `--until` switches back on). When
+everything left is off, `next` returns `{"kind": "idle"}` and claude-maxer
+ends the run instead of falling back to its own default tasks.
 
 - A `Tasks.md` task always goes first, whenever there is one.
 - Inside P3, review goes before optimize: no app gets a new optimization
@@ -67,6 +114,11 @@ python3 tasks_queue.py next [--small] [--skip "<vault task>"]...
                                         # the next task as JSON: {kind: vault, text}
                                         # | {kind: news, why: daily|filler} | {kind: review, ...}
                                         # | {kind: optimize, ...}, each with priority: P1..P4
+                                        #   and type; {kind: idle} when the rest is off
+python3 tasks_queue.py tasks           # every task with grade, task_type, on/off, model
+python3 tasks_queue.py off <task|type|all>... [--until WHEN]   # pass over it in `next`
+python3 tasks_queue.py on <task|type|all>...
+python3 tasks_queue.py model <task|type|all>... <model id|default>
 python3 tasks_queue.py news-ran         # today's news batch has started
 python3 tasks_queue.py pick             # first undone task text; exit 1 if none
 python3 tasks_queue.py list             # all undone tasks as "lineno<TAB>text"

@@ -91,7 +91,7 @@ target_5h: 95          # stop filling a window at this 5h %
 overshoot: 3           # never start a task likely to end above target + this
 weekly_target: 95      # spend the week up to this 7d %, split into daily budgets
 concurrency: 3         # tasks run in parallel per batch
-model: claude-opus-5-5 # model for the tasks
+model: claude-opus-5-5 # fallback model: tasks-queue gives each task its own (tasks_queue.py tasks)
 budget_usd: 5          # per-task cost cap (claude -p --max-budget-usd)
 task_timeout_min: 25   # per-task time cap
 ```

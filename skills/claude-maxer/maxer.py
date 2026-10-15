@@ -23,7 +23,9 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           one news batch if today hasn't had one, then review tasks (one
           app's open optimization PRs, verified and merged if they work),
           then optimize tasks (one app under /data/apps each, delivered as a
-          PR), then more news. The
+          PR), then more news. Tasks switched off in the queue
+          (`tasks_queue.py off …`) are passed over, and when nothing is
+          left the queue says idle and the run stops. The
           queue decides that order (`tasks_queue.py next`); this file only
           decides whether there is quota and whether a task fits. SKILL.md's own tasks are the default, used
           only when the queue can't be read. Start tasks in batches until 5h
@@ -468,6 +470,8 @@ def describe(task):
     if not task:
         return "queue unreadable (SKILL.md defaults would run)"
     grade = f"{task['priority']} " if task.get("priority") else ""
+    if task.get("model"):
+        grade += f"[{task['model']}] "
     if task["kind"] == "vault":
         return f"{grade}vault task: {task['text'][:80]}"
     if task["kind"] == "review":
@@ -476,6 +480,8 @@ def describe(task):
     if task["kind"] == "optimize":
         return (f"{grade}optimize {task['app']} → " + (f"PR to {task['repo']}" if task["pr"]
                                                       else "local branch only, no PR"))
+    if task["kind"] == "idle":
+        return f"none, run would stop: {task.get('why')}"
     return f"{grade}news ({task.get('why')})"
 
 
@@ -551,7 +557,7 @@ def run_optimize_task(task, deadline):
     started = time.time()
     res = {"slug": "optimize", "title": f"optimize: {app}", "start": started,
            "items": 0, "cost": 0.0}
-    cmd = ["claude", "-p", task["prompt"], "--model", CFG["model"], "--output-format", "json",
+    cmd = ["claude", "-p", task["prompt"], "--model", task.get("model") or CFG["model"], "--output-format", "json",
            "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
     timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
     reply = ""
@@ -608,7 +614,7 @@ def run_review_task(task, deadline):
     started = time.time()
     res = {"slug": "review", "title": f"review: {app}", "start": started,
            "items": 0, "cost": 0.0}
-    cmd = ["claude", "-p", task["prompt"], "--model", CFG["model"], "--output-format", "json",
+    cmd = ["claude", "-p", task["prompt"], "--model", task.get("model") or CFG["model"], "--output-format", "json",
            "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
     timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
     reply = ""
@@ -653,14 +659,14 @@ def run_review_task(task, deadline):
     return res
 
 
-def run_vault_task(text, deadline):
+def run_vault_task(text, deadline, model=None):
     """Run one vault task with full tools. Mark it done only if a new commit
     landed on master in the repo it names; otherwise count a failed attempt."""
     started = time.time()
     res = {"slug": "vault-task", "title": f"vault task: {text[:60]}", "start": started,
            "items": 0, "cost": 0.0}
     cmd = ["claude", "-p", VAULT_PROMPT.format(task=text, root=VAULT_TASK_ROOT),
-           "--model", CFG["model"], "--output-format", "json",
+           "--model", model or CFG["model"], "--output-format", "json",
            "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
     timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
     try:
@@ -819,7 +825,7 @@ def fmt_tokens(t):
             f"{n(t['cacheReadInputTokens'])} cache read, {n(t['outputTokens'])} out")
 
 
-def run_task(slug, title, prompt, day, deadline, lookback=1):
+def run_task(slug, title, prompt, day, deadline, lookback=1, model=None):
     path = note_path(day)
     already = covered_titles(path, lookback)
     seen = papers_seen() if title in PAPER_TASKS else None
@@ -827,7 +833,7 @@ def run_task(slug, title, prompt, day, deadline, lookback=1):
         already += papers_already(seen)
     cmd = [
         "claude", "-p", build_prompt(prompt, already),
-        "--model", CFG["model"],
+        "--model", model or CFG["model"],
         "--output-format", "json",
         "--max-budget-usd", CFG["budget_usd"],
         # Only web tools exist in the session: nothing to write with, no
@@ -1139,6 +1145,8 @@ def cmd_run(dry_run):
             print(VAULT_PROMPT.format(task=task["text"], root=VAULT_TASK_ROOT))
         elif task and task["kind"] in ("review", "optimize"):
             print(task["prompt"][:1500])
+        elif task and task["kind"] == "idle":
+            pass
         else:
             print(build_prompt(news[0][2], [])[:900])
         return 0
@@ -1181,11 +1189,14 @@ def cmd_run(dry_run):
                      or (task["kind"] in ("review", "optimize") and room < per_opt)):
             task = next_work(skip, small=True)
         task = task or {"kind": "news", "why": "queue unreadable"}
+        if task["kind"] == "idle":  # everything left is switched off in the queue
+            why = task.get("why", "queue idle")
+            break
         vt = task.get("text") if task["kind"] == "vault" else None
         ot = task if task["kind"] in ("review", "optimize") else None
         if vt:
             tried.add(vt)  # one attempt per run; a failure retries next run
-            results = [run_vault_task(vt, deadline)]
+            results = [run_vault_task(vt, deadline, task.get("model"))]
             u = fresh_usage()
             delta = (u["five_pct"] or 0) - before
             if delta > 0:
@@ -1209,7 +1220,8 @@ def cmd_run(dry_run):
             queue_call("news-ran")
             with ThreadPoolExecutor(max_workers=len(batch)) as ex:
                 results = list(ex.map(lambda t: run_task(
-                    *t, day, deadline, lookback=DAILY_LOOKBACK_DAYS if t in pinned else 1),
+                    *t, day, deadline, lookback=DAILY_LOOKBACK_DAYS if t in pinned else 1,
+                    model=task.get("model")),
                     batch))
             u = fresh_usage()
             delta = (u["five_pct"] or 0) - before
@@ -1370,6 +1382,10 @@ def cmd_show():
           + ("" if installed else "  (cron block NOT installed: ./enroll_cron.sh install)"))
     print(f"weekly limit: {weekly_ignored(now) or 'respected'}")
     print(f"back-to-back: {b2b_on(now) or 'off (windows open in pin hours only)'}")
+    r = queue_call("tasks")
+    if r and r[0] == 0:
+        print("queue tasks (tasks_queue.py on|off <name>):")
+        print("".join(f"  {l}\n" for l in r[1].splitlines()), end="")
     for k, v in CFG.items():
         print(f"  {k}: {v}")
     return 0

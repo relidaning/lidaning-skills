@@ -409,6 +409,174 @@ def cmd_review_done(app, status, still_open):
     return 0
 
 
+# ── switches ───────────────────────────────────────────────────────────────
+# Each queue task can be switched off; `next` then passes over it. task_type:
+#   scheduling  done once (a vault item; the day's news batch)
+#   consuming   open-ended, exists to use up spare quota (never "done")
+# A type name switches every task of that type at once.
+# model: what the caller runs the task on. Searching and summarizing news
+# doesn't need Opus; work that commits or merges unattended does. optimize
+# only opens a PR that review checks before merging, so it takes Sonnet.
+
+OPUS, SONNET = "claude-opus-5-5", "claude-sonnet-5-5"
+TASKS = [  # (name, grade, task_type, default model, what)
+    ("vault", "P1", "scheduling", OPUS, "undone items in the vault's Tasks.md"),
+    ("news-daily", "P2", "scheduling", SONNET, "the day's first news batch"),
+    ("review", "P3", "consuming", OPUS, "review and merge open optimization PRs"),
+    ("optimize", "P3", "consuming", SONNET, "optimize one app under /data/apps"),
+    ("news-filler", "P4", "consuming", SONNET, "more news batches as filler"),
+]
+TASK_TYPES = ("scheduling", "consuming")
+
+MODELS_PATH = os.path.expanduser(
+    os.environ.get("TASKS_QUEUE_MODELS", "~/.claude/state/tasks-queue-models.json"))
+
+
+def read_models():
+    """{name: model}: the default per task, with `model <task> <id>` overrides."""
+    try:
+        with open(MODELS_PATH) as f:
+            over = json.load(f)
+    except (OSError, ValueError):
+        over = {}
+    return {t[0]: over.get(t[0], t[3]) for t in TASKS}
+
+SWITCHES_PATH = os.path.expanduser(
+    os.environ.get("TASKS_QUEUE_SWITCHES", "~/.claude/state/tasks-queue-switches.json"))
+
+
+def read_switches():
+    """{name: {since, until}} for the tasks switched off. An expired --until
+    switches the task back on."""
+    try:
+        with open(SWITCHES_PATH) as f:
+            off = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    now = time.time()
+    live = {k: v for k, v in off.items() if not v.get("until") or v["until"] > now}
+    if live != off:
+        write_switches(live)
+    return live
+
+
+def write_switches(off):
+    os.makedirs(os.path.dirname(SWITCHES_PATH), exist_ok=True)
+    tmp = SWITCHES_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(off, f, indent=1)
+    os.replace(tmp, SWITCHES_PATH)
+
+
+def task_on(name, off=None):
+    return name not in (read_switches() if off is None else off)
+
+
+def parse_until(s, now):
+    """2h, 3d, 30m, HH:MM, YYYY-MM-DD or 'YYYY-MM-DD HH:MM' (as claude-maxer)."""
+    m = re.fullmatch(r"(\d+)\s*([mhd])", s.strip())
+    if m:
+        return now + int(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]]
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return time.mktime(time.strptime(s, fmt))
+        except ValueError:
+            pass
+    try:
+        t = time.strptime(s, "%H:%M")
+    except ValueError:
+        raise SystemExit(f"can't parse --until {s!r}: use 2h, 3d, 30m, HH:MM, YYYY-MM-DD "
+                         f"or 'YYYY-MM-DD HH:MM'")
+    lt = time.localtime(now)
+    ts = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, t.tm_hour, t.tm_min, 0, 0, 0, -1))
+    return ts if ts > now else ts + 86400  # next occurrence
+
+
+def cmd_tasks():
+    off, models = read_switches(), read_models()
+    for name, grade, ttype, _, what in TASKS:
+        state = "on"
+        if name in off:
+            u = off[name].get("until")
+            state = "off" + (time.strftime(" until %m-%d %H:%M", time.localtime(u)) if u else "")
+        print(f"{name:<12} {grade}  {ttype:<10}  {state:<22} {models[name]:<18} {what}")
+    return 0
+
+
+def pick_tasks(names):
+    """Task names for a list of task names, task_types and `all`."""
+    picked = []
+    for n in names:
+        if n == "all":
+            picked += [t[0] for t in TASKS]
+        elif n in TASK_TYPES:
+            picked += [t[0] for t in TASKS if t[2] == n]
+        elif n in [t[0] for t in TASKS]:
+            picked.append(n)
+        else:
+            raise SystemExit(f"unknown task {n!r}: one of {', '.join(t[0] for t in TASKS)}, "
+                             f"{', '.join(TASK_TYPES)} or all")
+    return picked
+
+
+def cmd_model(args):
+    """`model <task|type|all>... <model id|default>`."""
+    if len(args) < 2:
+        raise SystemExit("usage: tasks_queue.py model <task|scheduling|consuming|all>... "
+                         "<model id|default>")
+    *names, model = args
+    if "haiku" in model.lower():
+        # The user's call (2026-10-15): a Haiku benchmark run skipped skills
+        # it should have called (claude-maxer 0/30), so no task runs on it.
+        raise SystemExit("Haiku is not an option for queue tasks (user's decision, 2026-10-15)")
+    picked = pick_tasks(names)
+    try:
+        with open(MODELS_PATH) as f:
+            over = json.load(f)
+    except (OSError, ValueError):
+        over = {}
+    for n in picked:
+        if model == "default":
+            over.pop(n, None)
+        else:
+            over[n] = model
+    os.makedirs(os.path.dirname(MODELS_PATH), exist_ok=True)
+    with open(MODELS_PATH, "w") as f:
+        json.dump(over, f, indent=1)
+    return cmd_tasks()
+
+
+def cmd_switch(state, args):
+    """`on|off <task|type|all>... [--until WHEN]`."""
+    names, until = [], None
+    i = 0
+    while i < len(args):
+        if args[i] == "--until" and i + 1 < len(args):
+            until = args[i + 1]
+            i += 1
+        else:
+            names.append(args[i])
+        i += 1
+    if not names:
+        raise SystemExit(f"usage: tasks_queue.py {state} <task|scheduling|consuming|all>... "
+                         f"[--until WHEN]")
+    if until and state == "on":
+        raise SystemExit("--until goes with `off`")
+    picked = pick_tasks(names)
+    now = time.time()
+    end = parse_until(until, now) if until else None
+    if end is not None and end <= now:
+        raise SystemExit("--until is in the past")
+    off = read_switches()
+    for n in picked:
+        if state == "off":
+            off[n] = {"since": now, "until": end}
+        else:
+            off.pop(n, None)
+    write_switches(off)
+    return cmd_tasks()
+
+
 # ── the schedule ───────────────────────────────────────────────────────────
 # `next` is the one place that decides what runs next. Callers only decide
 # whether it fits: if a repo task (vault/optimize) is too big for what's left,
@@ -437,23 +605,33 @@ def next_task(skip=(), small=False):
     """P1 an undone Tasks.md item, P2 today's first news batch, P3 an app's
     optimization PRs to review, else an app to optimize, P4 news as filler.
     `skip`: vault task texts the caller won't run (already tried, or failed
-    too often). `small`: only news fits."""
-    if not small:
+    too often). `small`: only news fits. Tasks switched off are passed over;
+    with nothing left, {kind: idle}: the caller stops instead of falling back
+    to its own defaults."""
+    off, models = read_switches(), read_models()
+    if not small and task_on("vault", off):
         try:
             for _, line in undone_tasks(get_content()):
                 text = task_text(line)
                 if text not in skip:
-                    return {"kind": "vault", "priority": "P1", "text": text}
+                    return {"kind": "vault", "priority": "P1", "type": "scheduling",
+                            "model": models["vault"], "text": text}
         except Exception as e:  # vault down: the other tiers still run
             print(f"note: Tasks.md unreadable ({e}); skipping P1", file=sys.stderr)
-    if not news_ran_today():
-        return {"kind": "news", "priority": "P2", "why": "daily"}
+    if task_on("news-daily", off) and not news_ran_today():
+        return {"kind": "news", "priority": "P2", "type": "scheduling",
+                "model": models["news-daily"], "why": "daily"}
     if not small:
         # Review first: new optimizations wait until the old ones are judged.
-        t = review_task() or optimize_task()
+        t = ((task_on("review", off) and review_task())
+             or (task_on("optimize", off) and optimize_task()))
         if t:
-            return dict(t, priority="P3")
-    return {"kind": "news", "priority": "P4", "why": "filler"}
+            return dict(t, priority="P3", type="consuming", model=models[t["kind"]])
+    if task_on("news-filler", off):
+        return {"kind": "news", "priority": "P4", "type": "consuming",
+                "model": models["news-filler"], "why": "filler"}
+    return {"kind": "idle", "why": "nothing left to run: the rest is switched off "
+                                   "(tasks_queue.py tasks)"}
 
 
 def cmd_next(args):
@@ -504,10 +682,18 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: tasks_queue.py next [--small] [--skip TEXT]...|news-ran|pick|list|"
               "mark <text>|news|optimize|optimize-done <app> <status> [note]|optimize-list|"
-              "review|review-done <app> <done|failed> [open PR number]...",
+              "review|review-done <app> <done|failed> [open PR number]...|"
+              "tasks|on <task|type|all>...|off <task|type|all>... [--until WHEN]|"
+              "model <task|type|all>... <model id|default>",
               file=sys.stderr)
         sys.exit(2)
-    if sys.argv[1] == "next":
+    if sys.argv[1] == "tasks":
+        sys.exit(cmd_tasks())
+    elif sys.argv[1] == "model":
+        sys.exit(cmd_model(sys.argv[2:]))
+    elif sys.argv[1] in ("on", "off"):
+        sys.exit(cmd_switch(sys.argv[1], sys.argv[2:]))
+    elif sys.argv[1] == "next":
         sys.exit(cmd_next(sys.argv[2:]))
     elif sys.argv[1] == "news-ran":
         sys.exit(cmd_news_ran())
