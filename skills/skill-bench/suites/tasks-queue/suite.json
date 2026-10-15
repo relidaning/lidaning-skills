@@ -2,9 +2,9 @@
   "schema_version": 1,
   "suite": "tasks-queue",
   "target_skill": "tasks-queue",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "frozen": true,
-  "cases_sha256": "47eeb527bef3a706c783892437677855f19fea085c95bffc96fa414cb211323e",
+  "cases_sha256": "2867e3243e297f2aeb09ed06260c3d56c776eeee3c9aedc5db4269c251f7d3aa",
   "created": "2026-09-28",
   "skill_sha256_at_creation": "0a585c5fee557035cd44e4bc375ba07bc5133d6bfd8c4cb2a3ea3229b0f3cf58",
   "trigger_policy": "conditional",
@@ -67,5 +67,5 @@
       "Bash(python3 tasks_queue.py *)"
     ]
   },
-  "frozen_at": "2026-09-28T14:17:19"
+  "frozen_at": "2026-10-15T10:43:29"
 }

@@ -2,9 +2,9 @@
   "schema_version": 1,
   "suite": "context-summarize",
   "target_skill": "context-summarize",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "frozen": true,
-  "cases_sha256": "5cf0513be374eebacb2ea34730374b25d88aa4da109bc6c27dd851cab7aa7816",
+  "cases_sha256": "87be56c02c6d6ff0fbbace6d3193075945c58e14b83d8657a4a7fb4a74abf4fc",
   "created": "2026-09-24",
   "skill_sha256_at_creation": "ecaecb2723d7b58c7498e666b1b764dc2d8ec4c6ba34974b6fd5cff9a84e6308",
   "trigger_policy": "conditional",
@@ -61,5 +61,5 @@
   "reply_strip_regex": [
     "(?s)=== English Practice ===.*?=== English Practice ===\\s*"
   ],
-  "frozen_at": "2026-09-24T23:26:40"
+  "frozen_at": "2026-10-15T10:43:29"
 }
