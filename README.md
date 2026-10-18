@@ -14,7 +14,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | `obsidian-local` | project | Local Obsidian vault via REST API MCP — search, read, create, update notes. |
 | `rag-chroma` | project | General-purpose RAG: ingest docs/URLs/PDFs, embed, store, retrieve. |
 | `claude-maxer` | project | Documents/manages the keep-alive pings + opportunistic-work loop for Pro/Max limits. |
-| `nextcloud-paper` | project | Operate the self-hosted Nextcloud via MCP (WebDAV): list, read, write, move, search files. |
+| `nextcloud` | project | Work with files in the self-hosted Nextcloud via MCP (WebDAV): list, read, upload, download, move, copy, delete, search. |
 | `skill-bench` | project | Benchmark a skill: frozen, versioned trigger + behavior suites; headless trials; F1, rubric scores, pass@k, CIs, run history. |
 | `git-rules` | global | Personal git/GitHub rules: delete a branch once its PR is merged, repo settings, session notes. New rules are added here instead of the global CLAUDE.md. |
 

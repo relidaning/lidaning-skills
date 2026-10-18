@@ -1004,7 +1004,7 @@ def store_papers(docs):
 # a model; paper-fetch does it on request).
 
 PAPERS_DIR = os.path.expanduser("~/papers")
-NC_PAPERS_DIR = "papers"  # the one folder nextcloud-paper's allowlist permits
+NC_PAPERS_DIR = "papers"  # a folder the nextcloud skill's allowlist permits
 NC_ENV_FILE = os.path.expanduser("~/.zshrc.local")
 PDF_MIN_BYTES = 10 * 1024  # arXiv can serve an HTML error page with HTTP 200
 PDF_TIMEOUT_S = 120

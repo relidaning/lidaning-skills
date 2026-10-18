@@ -1,0 +1,9 @@
+name: nextcloud
+description: The agent's interface to the self-hosted Nextcloud cloud storage via MCP (WebDAV) - list, read, upload, download, move, copy, delete, and search files within an allowlist.
+scope: project
+tags:
+  - nextcloud
+  - files
+  - webdav
+  - mcp
+  - self-hosted

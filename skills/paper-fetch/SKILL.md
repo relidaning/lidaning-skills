@@ -130,7 +130,7 @@ HF `daily_papers` for today and recent dates; dedupe, present upvotes + titles.
 ### Store in Nextcloud (standard step after every download)
 
 Every verified download is uploaded to Nextcloud `papers/` — the one
-directory the `nextcloud-paper` skill's allowlist permits. Use curl WebDAV
+directory the `nextcloud` skill's allowlist permits. Use curl WebDAV
 directly (not MCP write — PDFs are too big to pipe through context):
 
 ```bash

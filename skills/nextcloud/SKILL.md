@@ -1,10 +1,12 @@
 ---
-name: nextcloud-paper
+name: nextcloud
 description: >
-  Activate when user mentions Nextcloud, or asks to list, read, upload,
-  download, move, copy, delete, or search files in their self-hosted cloud
-  storage. Operates the local Nextcloud instance via MCP (WebDAV file tools),
-  with a direct curl fallback.
+  Activate when the user mentions Nextcloud or their cloud storage / cloud
+  drive, or asks to list, browse, read, upload, download, save, back up,
+  share into, move, copy, rename, delete, or search files "in the cloud".
+  The agent's interface to the user's self-hosted Nextcloud: WebDAV file
+  tools via MCP (`nc_webdav_*`), with a direct curl fallback, limited to
+  the folders in its allowlist.
 ---
 
 ## Overview
@@ -76,23 +78,26 @@ Enforcement rules:
 ### Direct WebDAV (fallback)
 
 Base URL: `$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>`,
-auth `-u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD"`.
+auth `-u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD"`. **Always pass
+`--noproxy '*'`**: this machine's `http_proxy` points at the xray proxy and
+`no_proxy` is empty, so without it requests to `127.0.0.1:8080` go into the
+proxy and fail. URL-encode paths with spaces or `&` yourself — curl doesn't.
 
 ```bash
 # List a directory
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X PROPFIND -H "Depth: 1" \
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X PROPFIND -H "Depth: 1" \
   "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>/"
 
 # Download / upload
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -o local.bin \
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -o local.bin \
   "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>"
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -T local.bin \
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -T local.bin \
   "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>"
 
 # Mkdir / delete / move
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X MKCOL  "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<dir>"
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X DELETE "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>"
-curl -s -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X MOVE \
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X MKCOL  "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<dir>"
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X DELETE "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<path>"
+curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" -X MOVE \
   -H "Destination: $NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<new-path>" \
   "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/<old-path>"
 ```
