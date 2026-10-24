@@ -4,7 +4,7 @@ description: >
   The user's personal rules for git and GitHub repositories. Activate BEFORE
   acting whenever the work touches a repository's commits, branches, pull
   requests or GitHub settings: committing changes ("commit this", "commit the
-  work"), creating or deleting a branch, opening, merging or closing a PR, cleaning up after a merge, creating a new GitHub repo, pushing session
+  work"), creating or deleting a branch, opening, merging or closing a PR, cleaning up after a merge, the user confirming a feature works or passed testing (it then gets merged), creating a new GitHub repo, pushing session
   notes (SESSION.md, CLAUDE.md), or changing repo settings. Also activate when
   the user states a new git/GitHub habit or says "remember this rule", "add
   this to my git rules", "make it a rule for all my repos" — new rules are
@@ -78,6 +78,24 @@ git push -u origin <branch>   # first push of a new branch
 Push only the current branch, and never force-push under this rule. If the push is rejected (the remote has commits the local branch lacks) or fails, stop and report it; don't rebase, merge or force on your own.
 
 Don't push when the user says so ("commit only", "don't push"), when the repo has no remote, or when the task's own instructions forbid pushing (an unattended worker told to commit but never push).
+
+### 5. A feature that has passed its test is merged into the default branch, and its branch deleted
+
+Once the user has tried a feature and says it works ("great", "it works", "passed"), it goes into the default branch right away, without asking first. A finished feature left on a side branch is easy to forget, and the next piece of work then starts from a default branch that lacks it.
+
+1. Commit and push what's left on the branch (rule 4).
+2. Open a PR into the default branch if none is open, then merge it and delete the branch (rule 1):
+
+```bash
+gh pr create --base <default> --head <branch> --title "…" --body "…"
+gh pr merge <n> --merge --delete-branch
+git fetch --prune
+git merge-base --is-ancestor <last commit> origin/<default> && echo merged
+```
+
+If the repo has no GitHub remote, merge locally (`git switch <default> && git merge --no-ff <branch>`), push, then `git branch -d <branch>`.
+
+This needs the user's own test: passing checks or a build are not enough. It does not apply when the PR can't merge cleanly (stop and report the conflict), when the user says to hold it, when the project's `CLAUDE.md` holds that PR for the user's OK, or to PRs opened by unattended tasks the user hasn't tried. If the branch also carries other unmerged work, say so before merging, since that work goes in too.
 
 ## Adding or changing a rule
 
