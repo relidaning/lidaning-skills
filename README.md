@@ -66,6 +66,14 @@ message matches the skill's `description`.
 | `--global` | `~/.claude/skills/<name>/` | Personal skills you want everywhere |
 | `--project` | `.claude/skills/<name>/` | Skills specific to one repo |
 
+## Codex scheduler
+
+`claude-maxer` defaults to Claude Code; its cron runner also supports
+`--agent codex` for Codex quota checks and unattended execution. See its
+[Codex setup](skills/claude-maxer/SKILL.md#codex-scheduler-opt-in) before enrolling
+the separate Codex cron block. It uses the existing task queue and independent
+Codex quota state, without changing Claude model routing or benchmarking.
+
 ## Creating a skill
 
 ```

@@ -3,13 +3,13 @@
 # then hands off to maxer.py, which holds all the logic (window plan, gate,
 # tasks, vault log): see its docstring.
 #
-# Usage: run_maxer_work.sh tick | run|open|status [--dry-run] | show | off [--until WHEN] | on | weekly off|on | b2b on|off
+# Usage: run_maxer_work.sh [--agent claude|codex] tick | run|open|status [--dry-run] | show | off [--until WHEN] | on | weekly off|on | b2b on|off
 
 set -euo pipefail
 
 # cron sets no $HOME (breaks ~/.claude/.credentials.json lookup) and a minimal
 # PATH without claude (~/.local/bin).
-export HOME="/home/shake"
+export HOME="${HOME:-/home/shake}"
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.nvm/versions/node/v24.15.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # api.anthropic.com is reachable only through the local xray proxy; without

@@ -84,6 +84,65 @@ the 04:00 reset reopens at once and the windows chain round the clock
 (about 4.8 a day), drifting with whoever opened the last one. The weekly
 cap limits the total anyway.
 
+## Codex scheduler (opt-in)
+
+The same engine also supports `--agent codex`; without that flag it still uses
+Claude. This is an explicit Codex backend, using ChatGPT CLI authentication and
+`codex exec`, not Claude quota/model routing applied to Codex. Sign in with
+`codex login` first. Quota comes from the CLI app-server's
+`account/rateLimits/read`, without starting a model turn. It requires a known
+5h and 7d quota pair; missing, expired or unsupported windows and failed reads
+stop scheduling rather than treating quota as unlimited. API-key-only accounts
+and third-party model providers are not supported by this backend.
+
+```bash
+./run_maxer_work.sh --agent codex status
+./run_maxer_work.sh --agent codex run --dry-run
+./run_maxer_work.sh --agent codex off --until 2h
+./run_maxer_work.sh --agent codex on
+./enroll_cron.sh print --agent codex
+./enroll_cron.sh install --agent codex
+```
+
+Codex cron block (every ten minutes):
+
+```cron
+*/10 * * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh --agent codex tick >> /tmp/codex-maxer-cron.log 2>&1
+```
+
+`enroll_cron.sh install|remove|status|print --agent codex` manages its own block;
+it leaves the Claude block intact. To switch exclusively to Codex, remove the
+Claude block with `./enroll_cron.sh remove`, then install the Codex block.
+Installing both serializes ticks/runs through the existing shared locks; this
+is not simultaneous execution of both schedulers. Existing cron is not changed
+by adding the backend.
+
+Quota snapshots, daily budgets, switches and tick bookkeeping are independent
+in `${CODEX_HOME:-~/.codex}/state/maxer/`. The existing queue, work directory,
+rotation, failed-task counts and vault output stay shared in their established
+locations. Use `--agent codex` with every switch/status command to select Codex's
+state. There is no separate Codex usage-polling cron; each tick reads live quota.
+
+The same pin-hour/last-hour policy applies to the returned reset times. Codex
+uses `codex_model` (or `MAXER_CODEX_MODEL`); leave it empty to use the CLI's
+configured default. Queue-provided Claude model IDs are ignored. The default
+quota bucket is `codex`; `MAXER_CODEX_LIMIT_ID` selects another explicitly known
+bucket. Ensure any configured model uses that bucket.
+
+Codex repo workers use `workspace-write`, network access and `/data/apps` as an
+additional writable root, with approvals set to `never`; sandbox-denied work
+fails rather than prompting. News workers use `read-only`, live web search,
+disabled shell/apps/agents/hooks and disabled MCP/plugin entries discovered in
+user/project configuration. Parent Python code still writes the resulting
+news and reports. Workers and their child commands are killed at the deadline.
+Codex has no `--max-budget-usd` equivalent here: `budget_usd` is Claude-only;
+Codex is bounded by quota checks and task timeouts. Logs show token usage and
+`cost n/a`, not a fabricated dollar cost. No Claude SessionEnd hook, model-switch
+or skill-bench trial runner is used to implement Codex support.
+
+References: [OpenAI app-server quota protocol](https://learn.chatgpt.com/docs/app-server),
+[non-interactive execution](https://learn.chatgpt.com/docs/non-interactive-mode).
+
 ## Settings
 
 ```maxer-settings
@@ -92,6 +151,7 @@ overshoot: 3           # never start a task likely to end above target + this
 weekly_target: 95      # spend the week up to this 7d %, split into daily budgets
 concurrency: 3         # tasks run in parallel per batch
 model: claude-opus-5-5 # fallback model: tasks-queue gives each task its own (tasks_queue.py tasks)
+codex_model:          # Codex only; empty = CLI configured default
 budget_usd: 5          # per-task cost cap (claude -p --max-budget-usd)
 task_timeout_min: 25   # per-task time cap
 ```

@@ -12,20 +12,36 @@
 # (re-running replaces the block) and remove touches nothing else in the
 # crontab — the usage-polling entries and unrelated jobs are left alone.
 #
-# Usage: enroll_cron.sh [install|remove|status|print]   (default: status)
+# Usage: enroll_cron.sh [install|remove|status|print] [--agent claude|codex]
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SKILL_DIR/run_maxer_work.sh"
 TICK_SCHEDULE="${MAXER_TICK_SCHEDULE:-*/10 * * * *}"
-LOG="/tmp/claude-maxer-cron.log"
-BEGIN="# BEGIN claude-maxer schedule (managed by enroll_cron.sh)"
-END="# END claude-maxer schedule"
+ACTION="status"
+AGENT="claude"
+while (($#)); do
+  case "$1" in
+    --agent)
+      [[ $# -ge 2 ]] || { echo "--agent needs claude or codex" >&2; exit 2; }
+      AGENT="$2"; shift 2 ;;
+    install|remove|status|print) ACTION="$1"; shift ;;
+    *) echo "Usage: $0 [install|remove|status|print] [--agent claude|codex]" >&2; exit 2 ;;
+  esac
+done
+[[ "$AGENT" == claude || "$AGENT" == codex ]] || { echo "Unknown agent: $AGENT" >&2; exit 2; }
+LOG="/tmp/$AGENT-maxer-cron.log"
+BEGIN="# BEGIN $AGENT-maxer schedule (managed by enroll_cron.sh)"
+END="# END $AGENT-maxer schedule"
 
 block() {
   echo "$BEGIN"
-  echo "$TICK_SCHEDULE $RUNNER tick >> $LOG 2>&1"
+  if [[ "$AGENT" == codex ]]; then
+    echo "$TICK_SCHEDULE $RUNNER --agent codex tick >> $LOG 2>&1"
+  else
+    echo "$TICK_SCHEDULE $RUNNER tick >> $LOG 2>&1"
+  fi
   echo "$END"
 }
 
@@ -39,7 +55,7 @@ without_block() {
     !skip'
 }
 
-case "${1:-status}" in
+case "$ACTION" in
   install)
     [[ -x "$RUNNER" ]] || { echo "ERROR: $RUNNER missing or not executable" >&2; exit 1; }
     { without_block; block; } | crontab -
@@ -47,7 +63,7 @@ case "${1:-status}" in
     ;;
   remove)
     without_block | crontab -
-    echo "Removed claude-maxer schedule block (other crontab entries untouched)."
+    echo "Removed $AGENT-maxer schedule block (other crontab entries untouched)."
     ;;
   status)
     if current | grep -qxF "$BEGIN"; then

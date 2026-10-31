@@ -64,6 +64,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -73,6 +74,8 @@ from datetime import datetime, timedelta
 
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILL_PATH = os.path.join(SKILL_DIR, "SKILL.md")
+
+AGENT = "claude"
 
 STATE_DIR = os.path.expanduser("~/.claude/state")
 SNAPSHOT_PATH = os.path.join(STATE_DIR, "usage_snapshot.json")
@@ -109,6 +112,7 @@ DEFAULTS = {
     "weekly_target": 95.0,
     "concurrency": 3,
     "model": "claude-opus-5-5",
+    "codex_model": "",  # empty = Codex CLI configured default
     "budget_usd": "5",
     "task_timeout_min": 25,
 }
@@ -128,6 +132,58 @@ DEFAULT_VAULT_PCT = 10.0     # first guess at 5h% per vault task; replaced by me
 DEFAULT_OPT_PCT = 10.0       # same, per optimize or review task
 
 VAULT_ROOT = os.environ.get("OBSIDIAN_VAULT_PATH", "/data/nextcloud_client/obsidian/lidaning")
+
+
+def select_agent(agent):
+    """New provider state; existing Claude/queue/vault state stays in place."""
+    global AGENT, STATE_DIR, SNAPSHOT_PATH, LOG_PATH, BUDGET_PATH, PAUSE_PATH
+    global WEEKLY_OFF_PATH, B2B_PATH, TICK_PATH, FETCH_LOCK
+    AGENT = agent
+    if agent == "codex":
+        STATE_DIR = os.path.join(os.path.expanduser(os.environ.get("CODEX_HOME", "~/.codex")),
+                                 "state", "maxer")
+        for name, filename in (
+            ("SNAPSHOT_PATH", "usage_snapshot.json"), ("LOG_PATH", "maxer.log.jsonl"),
+            ("BUDGET_PATH", "day.json"), ("PAUSE_PATH", "off.json"),
+            ("WEEKLY_OFF_PATH", "weekly-off.json"), ("B2B_PATH", "b2b.json"),
+            ("TICK_PATH", "tick.json"),
+        ):
+            globals()[name] = os.path.join(STATE_DIR, filename)
+        FETCH_LOCK = os.path.join(STATE_DIR, "fetch.lock")
+    os.makedirs(STATE_DIR, exist_ok=True)
+
+
+def worker_command(prompt, model=None, news=False):
+    if AGENT == "codex":
+        from codex_backend import worker_command as command
+        return command(prompt, CFG["codex_model"], news=news)
+    cmd = ["claude", "-p", prompt, "--model", model or CFG["model"],
+           "--output-format", "json", "--max-budget-usd", CFG["budget_usd"]]
+    if news:
+        return cmd + ["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch", "WebFetch",
+                      "--strict-mcp-config"]
+    return cmd + ["--dangerously-skip-permissions"]
+
+
+def execute_worker(cmd, cwd, timeout):
+    """Kill the whole worker process group, including tools, at the deadline."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+def worker_output(process):
+    if AGENT == "codex":
+        from codex_backend import parse_output
+        return parse_output(process)
+    return json.loads(process.stdout)
 
 
 # ── SKILL.md: settings + tasks ─────────────────────────────────────────────
@@ -198,6 +254,19 @@ def hm(ts):
 
 def refresh_snapshot():
     """Fetch fresh usage under the shared fetch lock. Best-effort."""
+    if AGENT == "codex":
+        from codex_backend import normalize_usage, read_rate_limits
+        with open(FETCH_LOCK, "w") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            # Always require a successful live read; never reuse stale quota
+            # after a failed authentication/network/shape check.
+            usage = normalize_usage(read_rate_limits(),
+                                    limit_id=os.environ.get("MAXER_CODEX_LIMIT_ID", "codex"))
+            tmp = SNAPSHOT_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"cached_at": time.time(), "usage": usage}, f)
+            os.replace(tmp, SNAPSHOT_PATH)
+        return
     with open(FETCH_LOCK, "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
@@ -212,6 +281,8 @@ def refresh_snapshot():
 def read_usage():
     with open(SNAPSHOT_PATH) as f:
         snap = json.load(f)
+    if AGENT == "codex":
+        return dict(snap["usage"], age=time.time() - snap.get("cached_at", 0))
     rl = snap.get("rate_limits", {})
     five, seven = rl.get("five_hour") or {}, rl.get("seven_day") or {}
     return {
@@ -334,14 +405,14 @@ def clear_switch(path, event):
 
 def cmd_off(until):
     end = set_switch(PAUSE_PATH, until, "off")
-    print(f"claude-maxer is OFF until {datetime.fromtimestamp(end):%Y-%m-%d %H:%M}" if end
-          else "claude-maxer is OFF until `maxer.py on`")
+    print(f"{AGENT}-maxer is OFF until {datetime.fromtimestamp(end):%Y-%m-%d %H:%M}" if end
+          else f"{AGENT}-maxer is OFF until `maxer.py --agent {AGENT} on`")
     return 0
 
 
 def cmd_on():
-    print("claude-maxer is ON" if clear_switch(PAUSE_PATH, "on")
-          else "claude-maxer was already on")
+    print(f"{AGENT}-maxer is ON" if clear_switch(PAUSE_PATH, "on")
+          else f"{AGENT}-maxer was already on")
     return 0
 
 
@@ -557,14 +628,12 @@ def run_optimize_task(task, deadline):
     started = time.time()
     res = {"slug": "optimize", "title": f"optimize: {app}", "start": started,
            "items": 0, "cost": 0.0}
-    cmd = ["claude", "-p", task["prompt"], "--model", task.get("model") or CFG["model"], "--output-format", "json",
-           "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
-    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    cmd = worker_command(task["prompt"], task.get("model"))
+    timeout = max(0.1, min(CFG["task_timeout_min"] * 60, deadline - started))
     reply = ""
     try:
-        p = subprocess.run(cmd, cwd=path, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=timeout)
-        out = json.loads(p.stdout)
+        p = execute_worker(cmd, cwd=path, timeout=timeout)
+        out = worker_output(p)
         res["cost"] = float(out.get("total_cost_usd") or 0)
         res["tokens"] = token_usage(out)
         reply = PRACTICE_BLOCK.sub("", out.get("result") or "").strip()
@@ -614,14 +683,12 @@ def run_review_task(task, deadline):
     started = time.time()
     res = {"slug": "review", "title": f"review: {app}", "start": started,
            "items": 0, "cost": 0.0}
-    cmd = ["claude", "-p", task["prompt"], "--model", task.get("model") or CFG["model"], "--output-format", "json",
-           "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
-    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    cmd = worker_command(task["prompt"], task.get("model"))
+    timeout = max(0.1, min(CFG["task_timeout_min"] * 60, deadline - started))
     reply = ""
     try:
-        p = subprocess.run(cmd, cwd=path, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=timeout)
-        out = json.loads(p.stdout)
+        p = execute_worker(cmd, cwd=path, timeout=timeout)
+        out = worker_output(p)
         res["cost"] = float(out.get("total_cost_usd") or 0)
         res["tokens"] = token_usage(out)
         reply = PRACTICE_BLOCK.sub("", out.get("result") or "").strip()
@@ -665,14 +732,11 @@ def run_vault_task(text, deadline, model=None):
     started = time.time()
     res = {"slug": "vault-task", "title": f"vault task: {text[:60]}", "start": started,
            "items": 0, "cost": 0.0}
-    cmd = ["claude", "-p", VAULT_PROMPT.format(task=text, root=VAULT_TASK_ROOT),
-           "--model", model or CFG["model"], "--output-format", "json",
-           "--max-budget-usd", CFG["budget_usd"], "--dangerously-skip-permissions"]
-    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    cmd = worker_command(VAULT_PROMPT.format(task=text, root=VAULT_TASK_ROOT), model)
+    timeout = max(0.1, min(CFG["task_timeout_min"] * 60, deadline - started))
     try:
-        p = subprocess.run(cmd, cwd=VAULT_TASK_ROOT, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=timeout)
-        out = json.loads(p.stdout)
+        p = execute_worker(cmd, cwd=VAULT_TASK_ROOT, timeout=timeout)
+        out = worker_output(p)
         res["cost"] = float(out.get("total_cost_usd") or 0)
         res["tokens"] = token_usage(out)
         reply = out.get("result") or ""
@@ -831,30 +895,18 @@ def run_task(slug, title, prompt, day, deadline, lookback=1, model=None):
     seen = papers_seen() if title in PAPER_TASKS else None
     if seen:
         already += papers_already(seen)
-    cmd = [
-        "claude", "-p", build_prompt(prompt, already),
-        "--model", model or CFG["model"],
-        "--output-format", "json",
-        "--max-budget-usd", CFG["budget_usd"],
-        # Only web tools exist in the session: nothing to write with, no
-        # Skill call for the global english-practice rule to spend turns on,
-        # and --strict-mcp-config (with no config) loads no MCP servers.
-        "--tools", "WebSearch,WebFetch",
-        "--allowedTools", "WebSearch", "WebFetch",
-        "--strict-mcp-config",
-    ]
+    cmd = worker_command(build_prompt(prompt, already), model, news=True)
     started = time.time()
-    timeout = max(60, min(CFG["task_timeout_min"] * 60, deadline - started))
+    timeout = max(0.1, min(CFG["task_timeout_min"] * 60, deadline - started))
     res = {"slug": slug, "title": title, "start": started, "items": 0, "cost": 0.0}
     try:
-        p = subprocess.run(cmd, cwd=WORK_DIR, stdin=subprocess.DEVNULL, capture_output=True,
-                           text=True, timeout=timeout)
+        p = execute_worker(cmd, cwd=WORK_DIR, timeout=timeout)
     except subprocess.TimeoutExpired:
         res.update(end=time.time(), error="killed before the window reset")
         return res
     res["end"] = time.time()
     try:
-        out = json.loads(p.stdout)
+        out = worker_output(p)
     except ValueError:
         res["error"] = f"exit {p.returncode}, unparseable output"
         return res
@@ -1118,156 +1170,160 @@ def save_pdfs(docs):
 # ── commands ───────────────────────────────────────────────────────────────
 
 def cmd_run(dry_run):
-    lk = open(RUN_LOCK, "w")
-    try:
-        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print("another run is in progress")
-        return 0
-    os.makedirs(WORK_DIR, exist_ok=True)
-
-    u = fresh_usage()
-    ok, why = gate(u, time.time())
-    if not ok:
-        log("skip", reason=why, five=u["five_pct"], seven=u["seven_pct"])
-        if not dry_run:
-            vault_decision(time.time(), u, f"- {hm(time.time())} run · skipped: {why} "
-                                           f"(5h {u['five_pct']}%)")
-        return 0
-    if dry_run:
-        print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
-              f"7d {u['seven_pct']}% (today's ceiling {day_budget(u, time.time(), False)['ceiling']}%)")
-        task = next_work(sorted(k for k, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS))
-        news, src, _ = news_source()
-        print("queue's next task:", describe(task))
-        print(f"news tasks ({src}):", [t[1] for t in news])
-        if task and task["kind"] == "vault":
-            print(VAULT_PROMPT.format(task=task["text"], root=VAULT_TASK_ROOT))
-        elif task and task["kind"] in ("review", "optimize"):
-            print(task["prompt"][:1500])
-        elif task and task["kind"] == "idle":
-            pass
-        else:
-            print(build_prompt(news[0][2], [])[:900])
-        return 0
-
-    day = datetime.now().strftime("%Y-%m-%d")
-    note = log_note(day)
-    reset = u["five_reset"]
-    deadline = reset - KILL_MARGIN_S
-    start_five = u["five_pct"]
-    vault_decision(
-        time.time(), u,
-        f"\n### {hm(time.time())} run — window resets {hm(reset)}, "
-        f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (today's ceiling "
-        f"{day_budget(u, time.time())['ceiling']}%"
-        f"{', ignored: weekly switch is off' if weekly_ignored(time.time()) else ''}) · "
-        f"[[claude-maxer/news/{day}|news {day}]]\n",
-    )
-    log("run_start", five=u["five_pct"], seven=u["seven_pct"], resets=reset)
-
-    per_task, per_vault, per_opt = DEFAULT_TASK_PCT, DEFAULT_VAULT_PCT, DEFAULT_OPT_PCT
-    total_cost, tasks_done = 0.0, 0
-    total_tokens = dict.fromkeys(TOKEN_KEYS, 0)
-    tried = set()
-    news, src, daily = news_source()
-    pinned = [t for t in news if t[1] in daily]
-    rotating = [t for t in news if t[1] not in daily] or news
-    vault_append(note, f"- news tasks from {src}\n")
-    while True:
+    with open(RUN_LOCK, "w") as lk:
+        try:
+            fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("another run is in progress")
+            return 0
+        os.makedirs(WORK_DIR, exist_ok=True)
+        u = fresh_usage()
         ok, why = gate(u, time.time())
         if not ok:
-            break
-        # Never start a task expected to push 5h past target + overshoot:
-        # 100% locks the user out until the reset.
-        room = CFG["target_5h"] + CFG["overshoot"] - (u["five_pct"] or 0)
-        before = u["five_pct"] or 0
-        # The queue decides what's next; this loop only checks that it fits.
-        skip = sorted(tried | {t for t, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS})
-        task = next_work(skip)
-        if task and ((task["kind"] == "vault" and room < per_vault)
-                     or (task["kind"] in ("review", "optimize") and room < per_opt)):
-            task = next_work(skip, small=True)
-        task = task or {"kind": "news", "why": "queue unreadable"}
-        if task["kind"] == "idle":  # everything left is switched off in the queue
-            why = task.get("why", "queue idle")
-            break
-        vt = task.get("text") if task["kind"] == "vault" else None
-        ot = task if task["kind"] in ("review", "optimize") else None
-        if vt:
-            tried.add(vt)  # one attempt per run; a failure retries next run
-            results = [run_vault_task(vt, deadline, task.get("model"))]
-            u = fresh_usage()
-            delta = (u["five_pct"] or 0) - before
-            if delta > 0:
-                per_vault = delta
-        elif ot:
-            results = [(run_review_task if ot["kind"] == "review" else run_optimize_task)(
-                ot, deadline)]
-            u = fresh_usage()
-            delta = (u["five_pct"] or 0) - before
-            if delta > 0 and not results[0].get("outcome", "").startswith("skip"):
-                per_opt = delta  # a quick skip says nothing about a real visit's cost
-        else:
-            # News: today's first batch, or filler.
-            n = min(CFG["concurrency"], int(room // max(per_task, 0.5)))
-            if n < 1:
-                why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
-                break
-            # Daily-pinned tasks lead the day's first batch and never rotate.
-            first = pinned[:n] if task.get("why") == "daily" else []
-            batch = first + next_tasks(n - len(first), rotating)
-            queue_call("news-ran")
-            with ThreadPoolExecutor(max_workers=len(batch)) as ex:
-                results = list(ex.map(lambda t: run_task(
-                    *t, day, deadline, lookback=DAILY_LOOKBACK_DAYS if t in pinned else 1,
-                    model=task.get("model")),
-                    batch))
-            u = fresh_usage()
-            delta = (u["five_pct"] or 0) - before
-            if delta > 0:
-                per_task = delta / len(batch)
-        for r in results:
-            total_cost += r["cost"]
-            for k, v in r.get("tokens", {}).items():
-                total_tokens[k] += v
-            cost = f"${r['cost']:.2f} · {fmt_tokens(r.get('tokens'))}"
-            if r.get("error"):
-                tries = f" (attempt {r['attempt']}/{MAX_VAULT_ATTEMPTS})" if "attempt" in r else ""
-                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed{tries}: "
-                        f"{r['error']} · {cost}\n")
-            elif r["slug"] in ("optimize", "review"):
-                tasks_done += 1
-                app = r["title"].split(": ", 1)[1]
-                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['outcome']} · "
-                        f"[[claude-maxer/optimize/{app}|report]] · {cost}\n")
-            elif r["slug"] == "vault-task":
-                tasks_done += 1
-                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · done, committed "
-                        f"in {r['repo']}, checked off in Tasks.md · {cost}\n")
+            log("skip", reason=why, five=u["five_pct"], seven=u["seven_pct"])
+            if not dry_run:
+                vault_decision(time.time(), u, f"- {hm(time.time())} run · skipped: {why} "
+                                               f"(5h {u['five_pct']}%)")
+            return 0
+        if dry_run:
+            print(f"DRY RUN: would start tasks — 5h {u['five_pct']}%, resets {hm(u['five_reset'])}, "
+                  f"7d {u['seven_pct']}% (today's ceiling {day_budget(u, time.time(), False)['ceiling']}%)")
+            task = next_work(sorted(k for k, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS))
+            news, src, _ = news_source()
+            print("queue's next task:", describe(task))
+            print(f"news tasks ({src}):", [t[1] for t in news])
+            if task and task["kind"] == "vault":
+                print(VAULT_PROMPT.format(task=task["text"], root=VAULT_TASK_ROOT))
+            elif task and task["kind"] in ("review", "optimize"):
+                print(task["prompt"][:1500])
+            elif task and task["kind"] == "idle":
+                pass
             else:
-                tasks_done += 1
-                pdfs = ""
-                if r.get("pdfs"):
-                    p = r["pdfs"]
-                    pdfs = f"· {p['saved']} PDFs in Nextcloud papers/ "
-                    if p["failed"] or p["skipped"]:
-                        pdfs += f"({p['failed']} failed, {p['skipped']} without an arXiv ID) "
-                line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
-                        f"{pdfs}· {cost}\n")
-            vault_append(note, line)
-            log("task", **r)
-        vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(results)}: +{delta:.0f}pp)\n")
+                print(build_prompt(news[0][2], [])[:900])
+            return 0
 
-    vault_append(note, f"- stopped: {why}. {tasks_done} tasks, ${total_cost:.2f}, "
-                           f"{fmt_tokens(total_tokens)}, 5h {start_five}% → {u['five_pct']}%\n")
-    log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2), tokens=total_tokens,
-        five_start=start_five, five_end=u["five_pct"])
-    return 0
+        day = datetime.now().strftime("%Y-%m-%d")
+        note = log_note(day)
+        reset = u["five_reset"]
+        deadline = reset - KILL_MARGIN_S
+        start_five = u["five_pct"]
+        vault_decision(
+            time.time(), u,
+            f"\n### {hm(time.time())} run — window resets {hm(reset)}, "
+            f"5h {u['five_pct']}%, 7d {u['seven_pct']}% (today's ceiling "
+            f"{day_budget(u, time.time())['ceiling']}%"
+            f"{', ignored: weekly switch is off' if weekly_ignored(time.time()) else ''}) · "
+            f"[[claude-maxer/news/{day}|news {day}]]\n",
+        )
+        log("run_start", five=u["five_pct"], seven=u["seven_pct"], resets=reset)
+
+        per_task, per_vault, per_opt = DEFAULT_TASK_PCT, DEFAULT_VAULT_PCT, DEFAULT_OPT_PCT
+        total_cost, tasks_done = 0.0, 0
+        total_tokens = dict.fromkeys(TOKEN_KEYS, 0)
+        tried = set()
+        news, src, daily = news_source()
+        pinned = [t for t in news if t[1] in daily]
+        rotating = [t for t in news if t[1] not in daily] or news
+        vault_append(note, f"- news tasks from {src}\n")
+        while True:
+            ok, why = gate(u, time.time())
+            if not ok:
+                break
+            # Never start a task expected to push 5h past target + overshoot:
+            # 100% locks the user out until the reset.
+            room = CFG["target_5h"] + CFG["overshoot"] - (u["five_pct"] or 0)
+            before = u["five_pct"] or 0
+            # The queue decides what's next; this loop only checks that it fits.
+            skip = sorted(tried | {t for t, n in read_fails().items() if n >= MAX_VAULT_ATTEMPTS})
+            task = next_work(skip)
+            if task and ((task["kind"] == "vault" and room < per_vault)
+                         or (task["kind"] in ("review", "optimize") and room < per_opt)):
+                task = next_work(skip, small=True)
+            task = task or {"kind": "news", "why": "queue unreadable"}
+            if task["kind"] == "idle":  # everything left is switched off in the queue
+                why = task.get("why", "queue idle")
+                break
+            vt = task.get("text") if task["kind"] == "vault" else None
+            ot = task if task["kind"] in ("review", "optimize") else None
+            if vt:
+                tried.add(vt)  # one attempt per run; a failure retries next run
+                results = [run_vault_task(vt, deadline, task.get("model"))]
+                u = fresh_usage()
+                delta = (u["five_pct"] or 0) - before
+                if delta > 0:
+                    per_vault = delta
+            elif ot:
+                results = [(run_review_task if ot["kind"] == "review" else run_optimize_task)(
+                    ot, deadline)]
+                u = fresh_usage()
+                delta = (u["five_pct"] or 0) - before
+                if delta > 0 and not results[0].get("outcome", "").startswith("skip"):
+                    per_opt = delta  # a quick skip says nothing about a real visit's cost
+            else:
+                # News: today's first batch, or filler.
+                n = min(CFG["concurrency"], int(room // max(per_task, 0.5)))
+                if n < 1:
+                    why = f"5h at {u['five_pct']}%, one more task (~{per_task:.0f}pp) would overshoot"
+                    break
+                # Daily-pinned tasks lead the day's first batch and never rotate.
+                first = pinned[:n] if task.get("why") == "daily" else []
+                batch = first + next_tasks(n - len(first), rotating)
+                queue_call("news-ran")
+                with ThreadPoolExecutor(max_workers=len(batch)) as ex:
+                    results = list(ex.map(lambda t: run_task(
+                        *t, day, deadline, lookback=DAILY_LOOKBACK_DAYS if t in pinned else 1,
+                        model=task.get("model")),
+                        batch))
+                u = fresh_usage()
+                delta = (u["five_pct"] or 0) - before
+                if delta > 0:
+                    per_task = delta / len(batch)
+            for r in results:
+                total_cost += r["cost"]
+                for k, v in r.get("tokens", {}).items():
+                    total_tokens[k] += v
+                cost = ("cost n/a" if AGENT == "codex" else f"${r['cost']:.2f}") + f" · {fmt_tokens(r.get('tokens'))}"
+                if r.get("error"):
+                    tries = f" (attempt {r['attempt']}/{MAX_VAULT_ATTEMPTS})" if "attempt" in r else ""
+                    line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · failed{tries}: "
+                            f"{r['error']} · {cost}\n")
+                elif r["slug"] in ("optimize", "review"):
+                    tasks_done += 1
+                    app = r["title"].split(": ", 1)[1]
+                    line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['outcome']} · "
+                            f"[[claude-maxer/optimize/{app}|report]] · {cost}\n")
+                elif r["slug"] == "vault-task":
+                    tasks_done += 1
+                    line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · done, committed "
+                            f"in {r['repo']}, checked off in Tasks.md · {cost}\n")
+                else:
+                    tasks_done += 1
+                    pdfs = ""
+                    if r.get("pdfs"):
+                        p = r["pdfs"]
+                        pdfs = f"· {p['saved']} PDFs in Nextcloud papers/ "
+                        if p["failed"] or p["skipped"]:
+                            pdfs += f"({p['failed']} failed, {p['skipped']} without an arXiv ID) "
+                    line = (f"- {hm(r['start'])}–{hm(r['end'])} · {r['title']} · {r['items']} items "
+                            f"{pdfs}· {cost}\n")
+                vault_append(note, line)
+                log("task", **r)
+            vault_append(note, f"- 5h now {u['five_pct']}% (batch of {len(results)}: +{delta:.0f}pp)\n")
+
+        cost_total = "cost n/a" if AGENT == "codex" else f"${total_cost:.2f}"
+        vault_append(note, f"- stopped: {why}. {tasks_done} tasks, {cost_total}, "
+                               f"{fmt_tokens(total_tokens)}, 5h {start_five}% → {u['five_pct']}%\n")
+        log("run_end", reason=why, tasks=tasks_done, cost=round(total_cost, 2), tokens=total_tokens,
+            five_start=start_five, five_end=u["five_pct"])
+        return 0
 
 
 def ping():
     os.makedirs(WORK_DIR, exist_ok=True)
+    if AGENT == "codex":
+        cmd = worker_command("Reply with the single word: ack. Do not use tools.", news=True)
+        result = worker_output(execute_worker(cmd, cwd=WORK_DIR, timeout=180))
+        return 0 if result["result"].strip() == "ack" else 1
     p = subprocess.run(
         # --tools "" = no tools at all. Without it, the global CLAUDE.md sends
         # the model looking for a Skill call and a 1-turn cap fails the ping.
@@ -1287,6 +1343,13 @@ def cmd_open(dry_run):
             vault_decision(now, read_usage(), f"- {hm(now)} open · skipped: {off}")
         return 0
     u = fresh_usage()
+    if AGENT == "codex":
+        if u["five_pct"] >= CFG["target_5h"] or u["seven_pct"] >= 100:
+            log("open_skip", reason="Codex quota target reached")
+            return 0
+        if not weekly_ignored(now) and u["seven_pct"] >= day_budget(u, now)["ceiling"]:
+            log("open_skip", reason="Codex daily weekly-budget ceiling reached")
+            return 0
     if window_open(u, now):
         wait = u["five_reset"] - now
         if wait > OPEN_WAIT_MAX_S:
@@ -1312,7 +1375,7 @@ def cmd_open(dry_run):
         vault_decision(t, u, f"- {hm(t)} open · opened a window, resets "
                              f"{hm(u['five_reset']) if u['five_reset'] else '?'}")
     else:
-        vault_decision(t, u, f"- {hm(t)} open · FAILED (claude exit {rc})")
+        vault_decision(t, u, f"- {hm(t)} open · FAILED ({AGENT} exit {rc})")
     return 0 if rc == 0 else 1
 
 
@@ -1332,41 +1395,49 @@ def cmd_tick():
     before its actual reset; `open` fires once per pin hour (once per hour
     with b2b on), only when no window is open. open/run log their own decisions (skips included), so a
     window or pin gets one vault line, not one per tick."""
-    lk = open(TICK_LOCK, "w")
-    try:
-        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return 0  # an earlier tick is still running or waiting on a reset
-    try:
-        with open(TICK_PATH) as f:
-            st = json.load(f)
-    except (OSError, ValueError):
-        st = {}
+    with open(TICK_LOCK, "w") as lk:
+        try:
+            fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 0  # an earlier tick is still running or waiting on a reset
+        try:
+            with open(TICK_PATH) as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            st = {}
 
-    def save():
-        with open(TICK_PATH, "w") as f:
-            json.dump(st, f)
+        def save():
+            with open(TICK_PATH, "w") as f:
+                json.dump(st, f)
 
-    now = time.time()
-    u = read_usage()  # the */2 fetch keeps it fresh; open/run refresh again anyway
-    if u["age"] > 10 * 60:
-        u = fresh_usage()
-    if window_open(u, now):
-        reset = u["five_reset"]
-        # +90s: cron starts a few seconds late and resets_at jitters
-        if reset - now > RUN_LEAD_MIN * 60 + 90 or abs(st.get("ran_for", 0) - reset) < SAME_RESET_S:
+        now = time.time()
+        if paused(now):
             return 0
-        st["ran_for"] = reset
-        save()
-        return cmd_run(False)
-    slot = pin_slot(now, any_hour=bool(b2b_on(now)))
-    if slot is None or st.get("opened_for") == slot:
-        return 0
-    rc = cmd_open(False)
-    if rc == 0:  # a failed ping retries on the next tick while the pin hour lasts
-        st["opened_for"] = slot
-        save()
-    return rc
+        if AGENT == "codex":
+            u = fresh_usage()  # Codex has no separate usage-fetch cron.
+        else:
+            try:
+                u = read_usage()  # the */2 fetch keeps it fresh
+            except (OSError, ValueError):
+                u = fresh_usage()
+        if u["age"] > 10 * 60:
+            u = fresh_usage()
+        if window_open(u, now):
+            reset = u["five_reset"]
+            # +90s: cron starts a few seconds late and resets_at jitters
+            if reset - now > RUN_LEAD_MIN * 60 + 90 or abs(st.get("ran_for", 0) - reset) < SAME_RESET_S:
+                return 0
+            st["ran_for"] = reset
+            save()
+            return cmd_run(False)
+        slot = pin_slot(now, any_hour=bool(b2b_on(now)))
+        if slot is None or st.get("opened_for") == slot:
+            return 0
+        rc = cmd_open(False)
+        if rc == 0:  # a failed ping retries on the next tick while the pin hour lasts
+            st["opened_for"] = slot
+            save()
+        return rc
 
 
 def cmd_show():
@@ -1377,9 +1448,10 @@ def cmd_show():
         cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
     except OSError:
         cron = ""
-    installed = "# BEGIN claude-maxer schedule" in cron
+    installed = f"# BEGIN {AGENT}-maxer schedule" in cron
+    print(f"agent: {AGENT}")
     print(f"scheduler: {paused(now) or 'on'}"
-          + ("" if installed else "  (cron block NOT installed: ./enroll_cron.sh install)"))
+          + ("" if installed else f"  (cron block NOT installed: ./enroll_cron.sh install --agent {AGENT})"))
     print(f"weekly limit: {weekly_ignored(now) or 'respected'}")
     print(f"back-to-back: {b2b_on(now) or 'off (windows open in pin hours only)'}")
     r = queue_call("tasks")
@@ -1396,6 +1468,7 @@ def cmd_status():
     now = time.time()
     ok, why = gate(u, now)
     b = day_budget(u, now, persist=False)
+    print(f"agent: {AGENT}")
     print(f"switch: {paused(now) or 'on'}")
     print(f"weekly limit: {weekly_ignored(now) or 'respected (today’s ceiling applies)'}")
     print(f"back-to-back: {b2b_on(now) or 'off (windows open in pin hours only)'}")
@@ -1426,7 +1499,10 @@ def main():
     ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly or b2b")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--until", help="with off, weekly off or b2b on: 2h, 3d, 30m, HH:MM, YYYY-MM-DD, 'YYYY-MM-DD HH:MM'")
+    ap.add_argument("--agent", choices=["claude", "codex"], default="claude",
+                    help="quota provider and task runner (default: claude)")
     a = ap.parse_args()
+    select_agent(a.agent)
     if a.command == "off":
         return cmd_off(a.until)
     if a.command == "on":
@@ -1458,4 +1534,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        log("scheduler_error", agent=AGENT, error=str(exc)[:200])
+        sys.exit(1)
