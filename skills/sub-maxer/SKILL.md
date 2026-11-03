@@ -1,17 +1,17 @@
 ---
-name: claude-maxer
+name: sub-maxer
 description: >
   Trigger this skill when the request contains 'In order to untilize my claude limitation ...',   'to max my claude limitation ...', 
   'as my limitation of claude subscription has xx left ...', '5h', '7d', etc. Users want to leverate their Claude subscriptions. 
   Check if the background script exists, make one if it doesn't. Execute tasks follow the strategies.
   Work comes from the task queue (tasks-queue skill) when one is available; the tasks listed here
   are the defaults, run only when no task queue is available.
-  Also trigger when the user wants to pause, disable, switch off, resume or re-enable claude-maxer,
+  Also trigger when the user wants to pause, disable, switch off, resume or re-enable sub-maxer,
   or to ignore / respect the weekly (7d) limit, or to turn back-to-back windows (b2b) on or off.
 argument-hint: "[scheduler on|off [--until T]] [weekly on|off [--until T]] [b2b on|off] [show] [status]"
 ---
 
-# Claude-maxer
+# Sub-maxer
 
 Uses up spare Claude subscription quota on work that ends up in the vault.
 **This file is the control file.** `maxer.py` reads the **Settings** block
@@ -21,12 +21,12 @@ and safety mechanics (reading usage, never opening an off-schedule window,
 stopping tasks before a reset) are in `maxer.py`, because a model can't
 reliably keep time.
 
-## Arguments (`/claude-maxer <args>`)
+## Arguments (`/sub-maxer <args>`)
 
 When the skill is invoked with arguments, they are a command: run the
 matching line below in **one** Bash call, with the script's absolute path
-(`/data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh <args>`;
-the installed skill directory has only the `.md` files, not the scripts),
+(`/data/apps/lidaning-skills/skills/sub-maxer/run_maxer_work.sh <args>`;
+resolve helpers relative to this skill’s source directory),
 show its output, and do nothing else (no task work, no script checks, no
 other skill calls). `--until T` passes through
 unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
@@ -43,10 +43,14 @@ unchanged (`2h`, `3d`, `18:00`, `2026-10-01`).
 | `status` | `./run_maxer_work.sh status` (settings plus live usage, budget and the queue's next task) |
 
 Switches can be combined in one call, e.g.
-`/claude-maxer scheduler on weekly off b2b on`. After `scheduler off`, say whether a
+`/sub-maxer scheduler on weekly off b2b on`. After `scheduler off`, say whether a
 task is still running (`pgrep -af 'claude -p'`): the switch stops new tasks,
 not one already in progress. Anything else is not a command: treat it as a
 normal request. With no arguments, the skill works as described below.
+
+The skill was renamed from `claude-maxer`. Existing `.claude/state/claude-maxer*`
+files, vault `claude-maxer/` folders, provider-specific cron markers and the
+remote `claude-maxer-daily-ping` routine retain their deployment names.
 
 ## Schedule (crontab, machine-local CST)
 
@@ -107,7 +111,7 @@ and third-party model providers are not supported by this backend.
 Codex cron block (every ten minutes):
 
 ```cron
-*/10 * * * * /data/apps/lidaning-skills/skills/claude-maxer/run_maxer_work.sh --agent codex tick >> /tmp/codex-maxer-cron.log 2>&1
+*/10 * * * * /data/apps/lidaning-skills/skills/sub-maxer/run_maxer_work.sh --agent codex tick >> /tmp/codex-maxer-cron.log 2>&1
 ```
 
 `enroll_cron.sh install|remove|status|print --agent codex` manages its own block;
@@ -250,7 +254,10 @@ Find the 10 most important stories from the last 48 hours on China's technology 
 ## Output (vault, written only when tasks run)
 
 - `claude-maxer/news/YYYY-MM-DD.md`: all of the day's output in one note,
-  one `## HH:MM · Task` section per task.
+  one `## HH:MM · Task` section per task. Only the last 7 days stay there:
+  each `run` (once per window, even one skipped for quota) first moves
+  older notes to `claude-maxer/news/archive/YYYY-MM/` and repoints the log
+  notes' links to them.
 - Vault tasks land as commits in their own repo, not in the news note.
 - `claude-maxer/optimize/<app>.md`: one dated report per optimize visit
   (what it is, findings, what was chosen and why, before → after, what's
@@ -289,7 +296,7 @@ it exists, every `open` and `run` a tick starts does nothing and logs
 `skipped: switched off …` (so the vault log still shows the machine is alive),
 and a run already in progress stops starting new tasks. `--until` expires it
 by itself. The crontab stays untouched. When the user asks to pause, disable,
-stop, resume or re-enable claude-maxer, run these commands. The cloud backup
+stop, resume or re-enable sub-maxer, run these commands. The cloud backup
 ping (`claude-maxer-daily-ping` routine) can't see this file; it only opens a
 window and spends almost nothing, but pause it via the schedule skill if the
 user wants zero activity.

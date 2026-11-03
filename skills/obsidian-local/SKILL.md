@@ -7,6 +7,13 @@ description: >
   Obsidian app not required): read, write, patch, search, tag, move, and delete.
 ---
 
+## Agent compatibility
+
+Use the current agent’s available MCP tools for the `obsidian-vault`
+server; exact tool prefixes vary between Claude Code and Codex. Resolve
+`scripts/vault-mcp.sh` relative to this loaded skill directory; the absolute
+helper paths below describe the original deployment.
+
 ## Overview
 
 Two MCP servers, one skill:
@@ -101,7 +108,7 @@ container (27125), not at the plugin.
 For scripts/cron with no MCP session, use the Python client
 `scripts/vault_mcp.py` (`call`, `read_note`, `write_note`, `exists`); it
 talks to the container, bypasses the proxy and starts the container if it's
-down. `tasks-queue` and `claude-maxer` use it.
+down. `tasks-queue` and `sub-maxer` use it.
 
 ## Workflows
 

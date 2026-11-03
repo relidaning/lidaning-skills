@@ -10,6 +10,17 @@ description: >
   (.claude/MEMORIES.md). Not a task tracker — tasks belong to tasks-queue.
 ---
 
+## Agent compatibility
+
+Use `AGENTS.md` for Codex project concepts and `CLAUDE.md` for Claude Code.
+Below, `CLAUDE.md` means that selected concepts file. If a project already
+stores its concepts in one file, keep that file authoritative and reference it
+from the other agent's entrypoint. Do not duplicate the concepts.
+`SESSION.md` and the existing `.claude/MEMORIES.md` remain shared by both
+agents; the latter is a data path, not a requirement to run Claude.
+The SessionEnd hook described below is Claude-only and optional. In Codex,
+perform the recording workflow directly; do not assume that hook will run.
+
 ## What this skill is for
 
 It keeps the project's memory: **what happened** (sessions), **how the

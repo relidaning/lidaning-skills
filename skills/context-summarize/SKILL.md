@@ -28,7 +28,7 @@ vault at `0_dev/AI/Papers/` — that write is `paper-fetch`'s job (via
 - **Pasted text** — summarize what's in the message directly.
 - **A file path** — Read it. For large files, read in chunks and summarize
   incrementally rather than truncating silently.
-- **A URL** — fetch it (WebFetch) before summarizing; don't guess at content
+- **A URL** — fetch it with the available web tool before summarizing; don't guess at content
   from the URL alone.
 - **"This conversation" / "catch me up" / "where are we"** — summarize the
   conversation so far from context already in scope. Don't re-fetch anything.

@@ -15,7 +15,7 @@ description: >
 
 # Git and GitHub rules
 
-These are the user's standing rules for every repository they own. They apply in all projects. A project's own `CLAUDE.md` wins where it says something different.
+These are the user's standing rules for every repository they own. They apply in all projects. A project's own `AGENTS.md` / `CLAUDE.md` wins where it says something different.
 
 "The user's repos" means the repos owned by the logged-in GitHub account (`gh api user --jq .login`).
 
@@ -95,13 +95,13 @@ git merge-base --is-ancestor <last commit> origin/<default> && echo merged
 
 If the repo has no GitHub remote, merge locally (`git switch <default> && git merge --no-ff <branch>`), push, then `git branch -d <branch>`.
 
-This needs the user's own test: passing checks or a build are not enough. It does not apply when the PR can't merge cleanly (stop and report the conflict), when the user says to hold it, when the project's `CLAUDE.md` holds that PR for the user's OK, or to PRs opened by unattended tasks the user hasn't tried. If the branch also carries other unmerged work, say so before merging, since that work goes in too.
+This needs the user's own test: passing checks or a build are not enough. It does not apply when the PR can't merge cleanly (stop and report the conflict), when the user says to hold it, when the project's `AGENTS.md` / `CLAUDE.md` holds that PR for the user's OK, or to PRs opened by unattended tasks the user hasn't tried. If the branch also carries other unmerged work, say so before merging, since that work goes in too.
 
 ## Adding or changing a rule
 
 When the user states a new git or GitHub habit, or asks to remember one, it goes here rather than into a `CLAUDE.md`, so it follows the user to every machine where this skill is installed.
 
-1. Find the skill's source: `readlink -f ~/.claude/skills/git-rules/SKILL.md` gives the file inside the user's skills repository. Edit that file, not a copy.
+1. Find the skill's source by resolving the loaded `SKILL.md` path with `realpath`. Typical global paths are `~/.agents/skills/git-rules/SKILL.md` for Codex and `~/.claude/skills/git-rules/SKILL.md` for Claude Code; project installs also work. Edit the resolved source, not a copy.
 2. Add a numbered section under "Rules": the rule in one sentence as the heading, then why the user wants it, then the exact commands. Say when the rule does not apply.
 3. If the rule needs a setting changed on existing repos, apply it now and report how many repos changed.
 4. Commit and push the skills repository, so other machines get the rule on their next pull.

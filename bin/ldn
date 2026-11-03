@@ -40,16 +40,51 @@ skill_desc() {
   awk '/^description:/ {sub("^description: *",""); print; exit}' "$dir/metadata.yaml"
 }
 
-# The agent comes from -agent/--agent (default claude) and is handed to
-# install.sh; check the matching skills dir so pre-selection reflects that
-# agent's installs.
-is_installed_in_cwd() {
-  local name="$1"
+# Resolve the selected scope independently of the caller's working directory.
+skills_root() {
+  local agent="$1"
+  if [[ "$SCOPE" == "global" ]]; then
+    case "$agent" in
+      claude) printf '%s' "$HOME/.claude/skills" ;;
+      codex) printf '%s' "$HOME/.agents/skills" ;;
+      opencode) printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" ;;
+    esac
+  else
+    local directory="$agent"
+    [[ "$agent" == "codex" ]] && directory="agents"
+    printf '%s' "$PWD/.$directory/skills"
+  fi
+}
+
+is_installed() {
+  local name="$1" agent
+  local agents=("$AGENT")
   case "$AGENT" in
-    opencode) [[ -d "$PWD/.opencode/skills/$name" ]] ;;
-    all)      [[ -d "$PWD/.claude/skills/$name" && -d "$PWD/.opencode/skills/$name" ]] ;;
-    *)        [[ -d "$PWD/.claude/skills/$name" ]] ;;
+    both) agents=(claude codex) ;;
+    all) agents=(claude codex opencode) ;;
   esac
+  for agent in "${agents[@]}"; do
+    [[ -f "$(skills_root "$agent")/$name/SKILL.md" ]] || return 1
+  done
+}
+
+mcp_config() {
+  local agent="$1" config
+  if [[ "$SCOPE" == "global" ]]; then
+    case "$agent" in
+      claude) config="$HOME/.claude/settings.json" ;;
+      codex) config="${CODEX_HOME:-$HOME/.codex}/config.toml" ;;
+      opencode) config="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json" ;;
+    esac
+  else
+    case "$agent" in
+      claude) config="$PWD/.mcp.json" ;;
+      codex) config="$PWD/.codex/config.toml" ;;
+      opencode) config="$PWD/opencode.json" ;;
+    esac
+  fi
+  if [[ "$agent" == "opencode" && -f "${config}c" ]]; then config="${config}c"; fi
+  printf '%s' "$config"
 }
 
 # ---------------------------------------------------------------------------
@@ -57,13 +92,13 @@ is_installed_in_cwd() {
 # ---------------------------------------------------------------------------
 
 cmd_list() {
-  printf "${CYAN}lidaning-skills${NC} ${DIM}[$AGENT]${NC}\n\n"
+  printf "${CYAN}lidaning-skills${NC} ${DIM}[$AGENT, $SCOPE]${NC}\n\n"
   while IFS= read -r name; do
     local dir scope desc marker
     dir=$(skill_dir "$name")
-    scope=$(skill_scope "$dir")
+    scope="$SCOPE"
     desc=$(skill_desc "$dir")
-    if is_installed_in_cwd "$name"; then
+    if is_installed "$name"; then
       marker="${GREEN}[installed]${NC}"
     else
       marker="${DIM}[not installed]${NC}"
@@ -74,7 +109,7 @@ cmd_list() {
 }
 
 # ---------------------------------------------------------------------------
-# MCP inject: write skill mcp.json configs into cwd's .mcp.json + settings.local.json
+# MCP inject: write skill mcp.json configs into the selected scope
 # ---------------------------------------------------------------------------
 
 # Returns a space-separated list of "name:mcp_json_path" for skills that ship mcp.json
@@ -88,64 +123,13 @@ skills_with_mcp() {
 }
 
 cmd_mcp_inject() {
-  if [[ "$AGENT" != "claude" ]]; then
-    local names=()
-    mapfile -t names < <(skills_with_mcp)
-    if [[ ${#names[@]} -eq 0 ]]; then
-      printf "[mcp] no skills ship mcp.json — nothing to inject.\n"
-      return 0
-    fi
-    "$SKILLS_DIR/install.sh" "${names[@]}" --project --mcp-only
-    [[ "$AGENT" == "all" ]] || return 0
+  local names=()
+  mapfile -t names < <(skills_with_mcp)
+  if [[ ${#names[@]} -eq 0 ]]; then
+    printf "[mcp] no skills ship mcp.json — nothing to inject.\n"
+    return 0
   fi
-  python3 - "$SKILLS_DIR" <<'PYEOF'
-import json, sys, os, glob
-
-skills_dir = sys.argv[1]
-cwd = os.getcwd()
-mcp_file = os.path.join(cwd, ".mcp.json")
-local_settings_file = os.path.join(cwd, ".claude", "settings.local.json")
-
-# Collect all mcp.json files from skills
-skill_mcps = glob.glob(os.path.join(skills_dir, "skills", "*", "mcp.json"))
-if not skill_mcps:
-    print("[mcp] no skills ship mcp.json — nothing to inject.")
-    sys.exit(0)
-
-mcp = json.load(open(mcp_file)) if os.path.exists(mcp_file) else {"mcpServers": {}}
-mcp.setdefault("mcpServers", {})
-
-local_settings = json.load(open(local_settings_file)) if os.path.exists(local_settings_file) else {}
-enabled = local_settings.setdefault("enabledMcpjsonServers", [])
-
-added, updated = [], []
-for skill_mcp_path in sorted(skill_mcps):
-    servers = json.load(open(skill_mcp_path))
-    for key, cfg in servers.items():
-        if key not in mcp["mcpServers"]:
-            added.append(key)
-        elif mcp["mcpServers"][key] != cfg:
-            updated.append(key)
-        mcp["mcpServers"][key] = cfg
-        if key not in enabled:
-            enabled.append(key)
-
-os.makedirs(os.path.join(cwd, ".claude"), exist_ok=True)
-with open(mcp_file, "w") as f:
-    json.dump(mcp, f, indent=2)
-    f.write("\n")
-with open(local_settings_file, "w") as f:
-    json.dump(local_settings, f, indent=2)
-    f.write("\n")
-
-if added:
-    print(f"[mcp] .mcp.json: added {', '.join(added)}")
-if updated:
-    print(f"[mcp] .mcp.json: updated {', '.join(updated)}")
-if not added and not updated:
-    print("[mcp] .mcp.json: already up to date")
-print(f"[mcp] .claude/settings.local.json: enabledMcpjsonServers = {enabled}")
-PYEOF
+  "$SKILLS_DIR/install.sh" "${names[@]}" "--$SCOPE" --mcp-only --agent "$AGENT"
 }
 
 # ---------------------------------------------------------------------------
@@ -162,19 +146,19 @@ cmd_manage() {
 
   local all_skills=()
   local was_installed=()
-  local MCP_ITEM="⟶ inject MCP servers into .mcp.json (cwd)"
-  local mcp_file="$PWD/.mcp.json"
-  if [[ "$AGENT" == "opencode" ]]; then
-    MCP_ITEM="⟶ inject MCP servers into opencode.json (cwd)"
-    mcp_file="$PWD/opencode.json"
-    [[ -f "$PWD/opencode.jsonc" ]] && mcp_file="$PWD/opencode.jsonc"
-  elif [[ "$AGENT" == "all" ]]; then
-    MCP_ITEM="⟶ inject MCP servers into .mcp.json + opencode.json (cwd)"
+  local config_agent="$AGENT"
+  [[ "$AGENT" == "both" || "$AGENT" == "all" ]] && config_agent="claude"
+  local mcp_file
+  mcp_file=$(mcp_config "$config_agent")
+  local MCP_ITEM="⟶ inject MCP servers into $mcp_file"
+  if [[ "$AGENT" == "both" || "$AGENT" == "all" ]]; then
+    MCP_ITEM+=" + $(mcp_config codex)"
+    [[ "$AGENT" == "all" ]] && MCP_ITEM+=" + $(mcp_config opencode)"
   fi
 
   local gum_args=(
     choose --no-limit
-    --header="[$AGENT] Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
+    --header="[$AGENT, $SCOPE] Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
     --cursor-prefix="[ ] "
     --selected-prefix="[x] "
     --unselected-prefix="[ ] "
@@ -187,7 +171,7 @@ cmd_manage() {
 
   while IFS= read -r name; do
     all_skills+=("$name")
-    if is_installed_in_cwd "$name"; then
+    if is_installed "$name"; then
       was_installed+=("$name")
       gum_args+=(--selected="$name")
     fi
@@ -212,25 +196,25 @@ cmd_manage() {
 
   local did_something=false
 
-  # Install newly selected (into cwd's skills dir for $AGENT)
+  # Install newly selected skills into the selected scope.
   for name in "${all_skills[@]}"; do
-    if [[ -n "${chosen_set[$name]:-}" ]] && ! is_installed_in_cwd "$name"; then
+    if [[ -n "${chosen_set[$name]:-}" ]] && ! is_installed "$name"; then
       printf "${CYAN}[add]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" "$name" --project
+      "$SKILLS_DIR/install.sh" "$name" "--$SCOPE" --agent "$AGENT"
       did_something=true
     fi
   done
 
-  # Remove newly deselected (from cwd only)
+  # Remove newly deselected skills from the selected scope.
   for name in "${was_installed[@]}"; do
     if [[ -z "${chosen_set[$name]:-}" ]]; then
       printf "${YELLOW}[rm]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" --remove "$name" --project
+      "$SKILLS_DIR/install.sh" --remove "$name" "--$SCOPE" --agent "$AGENT"
       did_something=true
     fi
   done
 
-  # Inject MCP configs into cwd if that item was selected
+  # Inject MCP configs into the selected scope if that item was selected
   if [[ -n "${chosen_set[$MCP_ITEM]:-}" ]]; then
     cmd_mcp_inject
     did_something=true
@@ -249,28 +233,35 @@ usage() {
   printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
   printf "  ${CYAN}ldn${NC}          Toggle skills on/off (checkbox UI)\n"
   printf "  ${CYAN}ldn list${NC}     Plain-text list with install status\n"
-  printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into cwd's MCP config\n\n"
-  printf "  ${CYAN}-agent <claude|opencode|all>${NC}  Agent to manage skills for (default: claude)\n"
+  printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into the selected scope\n\n"
+  printf "  --global / -g   Manage skills for all projects (current user)\n"
+  printf "  --project / -p  Manage skills in cwd (default)\n\n"
+  printf "  ${CYAN}-agent <claude|codex|both|opencode|all>${NC}  Agent to manage skills for (default: claude)\n"
   printf "      claude    .claude/skills/, .mcp.json\n"
+  printf "      codex     .agents/skills/, .codex/config.toml\n"
+  printf "      both      Claude Code + Codex; all also includes OpenCode\n"
   printf "      opencode  .opencode/skills/, opencode.json\n"
-  printf "  e.g. ${CYAN}ldn -agent opencode${NC}, ${CYAN}ldn list -agent opencode${NC}\n"
+  printf "  e.g. ${CYAN}ldn -agent opencode${NC}, ${CYAN}ldn --global --agent codex${NC}\n"
 }
 
-# -agent/--agent/-a may appear anywhere; everything else is the command.
+# Agent and scope options may appear anywhere; everything else is the command.
 AGENT="claude"
+SCOPE="project"
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
+  --global | -g) SCOPE="global"; shift ;;
+  --project | -p) SCOPE="project"; shift ;;
   -agent | --agent | -a)
-    [[ $# -ge 2 ]] || { printf "ldn: %s needs claude, opencode or all\n" "$1" >&2; exit 1; }
+    [[ $# -ge 2 ]] || { printf "ldn: %s needs claude, codex, both, opencode or all\n" "$1" >&2; exit 1; }
     AGENT="$2"; shift 2 ;;
   -agent=* | --agent=*) AGENT="${1#*=}"; shift ;;
   *) ARGS+=("$1"); shift ;;
   esac
 done
 case "$AGENT" in
-claude | opencode | all) ;;
-*) printf "ldn: unknown agent '%s' (expected claude, opencode or all)\n" "$AGENT" >&2; exit 1 ;;
+claude | codex | both | opencode | all) ;;
+*) printf "ldn: unknown agent '%s' (expected claude, codex, both, opencode or all)\n" "$AGENT" >&2; exit 1 ;;
 esac
 # install.sh reads the agent from LDN_AGENT
 export LDN_AGENT="$AGENT"

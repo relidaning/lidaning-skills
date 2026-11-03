@@ -6,8 +6,8 @@ description: >
   search, find, fetch, read, or download AI/ML/DL papers; also on any mention
   of arXiv, Hugging Face papers, Semantic Scholar, an arXiv ID, paper title,
   or paper URL. Searches arXiv, HF papers, and Semantic Scholar via their
-  public APIs, downloads PDFs to ~/papers/, stores them in Nextcloud
-  papers/, and writes a summary note per paper to the Obsidian vault at
+  public APIs, stores PDFs in Nextcloud papers/ (no local copy is kept),
+  and writes a summary note per paper to the Obsidian vault at
   0_dev/AI/Papers/.
 ---
 
@@ -19,10 +19,12 @@ papers: **arXiv** (canonical source + PDFs), **Hugging Face papers** (trending
 open-access PDFs for non-arXiv venues). All via public APIs with `curl` — no
 keys, no MCP server.
 
-Downloads go to `~/papers/` (create it if missing), named
-`<arxiv-id> - <title>.pdf` (sanitize `/`, `:`, `?` out of titles), and are
-then uploaded to Nextcloud `papers/` (see "Store in Nextcloud" below) — the
-local copy stays as a cache. Every download also gets a **summary note in
+PDFs are kept **only in Nextcloud `papers/`**, named
+`<arxiv-id> - <title>.pdf` (sanitize `/`, `:`, `?` out of titles). A download
+goes to a temp file in the session scratchpad (or `mktemp -d`), is uploaded
+(see "Store in Nextcloud" below), and the temp file is then deleted. There is
+no local `~/papers/` cache any more (removed 2026-10-26, the user's call). To
+read a stored paper, fetch it from Nextcloud into a temp dir first. Every download also gets a **summary note in
 the Obsidian vault** at `0_dev/AI/Papers/` (see "Store a summary note in
 the vault" below).
 
@@ -42,7 +44,8 @@ curl -s "https://export.arxiv.org/api/query?search_query=all:%22state+space+mode
 curl -s "https://export.arxiv.org/api/query?id_list=2312.00752"
 
 # Download PDF (versionless URL = latest version; append v1/v2 to pin)
-curl -sL -o ~/papers/"2312.00752 - Mamba.pdf" "https://arxiv.org/pdf/2312.00752"
+tmp=$(mktemp -d)
+curl -sL -o "$tmp/2312.00752 - Mamba.pdf" "https://arxiv.org/pdf/2312.00752"
 ```
 
 Parse the Atom XML with python3 rather than grep:
@@ -113,15 +116,17 @@ search hit.
    `arxiv.org/pdf/…`, or `huggingface.co/papers/…` URLs).
 2. Title only → search arXiv `ti:%22<title>%22` first; ambiguous matches →
    show the top hits and ask.
-3. `mkdir -p ~/papers` then `curl -sL -o` the PDF.
+3. `tmp=$(mktemp -d)` (or the session scratchpad) then `curl -sL -o` the PDF
+   into it.
 4. Verify: `file` must say PDF and size must be plausible (>10 KB). arXiv
    sometimes serves an HTML error page with HTTP 200 — a tiny or non-PDF file
    means the download failed; report it, don't leave the bad file behind.
 5. Upload the verified PDF to Nextcloud `papers/` (next section). If Nextcloud
-   is unreachable, keep the local copy, tell the user the upload failed, and
-   don't retry endlessly.
+   is unreachable, tell the user the upload failed and where the temp copy is
+   (so nothing is lost), and don't retry endlessly.
 6. Write a summary note to the Obsidian vault at `0_dev/AI/Papers/` (see
-   "Store a summary note in the vault" below).
+   "Store a summary note in the vault" below); it reads the temp PDF.
+7. Delete the temp PDF once it is uploaded and the note is written.
 
 ### "What's new / trending this week?"
 
@@ -138,7 +143,7 @@ source ~/.zshrc.local   # NEXTCLOUD_HOST / _USERNAME / _PASSWORD (app password)
 f="1706.03762 - Attention Is All You Need.pdf"
 enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$f")
 curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
-  -T ~/papers/"$f" \
+  -T "$tmp/$f" \
   "$NEXTCLOUD_HOST/remote.php/dav/files/$NEXTCLOUD_USERNAME/papers/$enc" \
   -w "%{http_code}\n"
 ```
@@ -150,7 +155,8 @@ curl -s --noproxy '*' -u "$NEXTCLOUD_USERNAME:$NEXTCLOUD_PASSWORD" \
   `127.0.0.1:8080` get routed into the proxy and fail.
 - **URL-encode the filename** (spaces, `&`, …) as shown; curl does not encode
   `-T` target URLs for you.
-- Skip the upload only if the user explicitly says local-only.
+- Skip the upload only if the user explicitly says local-only; then save to a
+  path the user names, since there is no default local folder.
 
 ### Store a summary note in the vault (standard step after every download)
 

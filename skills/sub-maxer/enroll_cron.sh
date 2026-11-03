@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-maxer: enroll/remove the crontab entries that drive maxer.py.
+# sub-maxer: enroll/remove the crontab entries that drive maxer.py.
 #
 #   */10 * * * *   tick  maxer.py decides from the actual 5h reset time:
 #                        run ~1h before it, open a window in a pin hour

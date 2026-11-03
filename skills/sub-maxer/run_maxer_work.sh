@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-maxer cron entry point. Sets up the environment that cron lacks,
+# sub-maxer cron entry point. Sets up the environment that cron lacks,
 # then hands off to maxer.py, which holds all the logic (window plan, gate,
 # tasks, vault log): see its docstring.
 #

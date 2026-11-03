@@ -17,6 +17,12 @@ description: >
   instead (skillopt may consume this skill's suites).
 ---
 
+## Agent compatibility
+
+This harness runs `claude -p` and requires Claude Code, even when invoked
+from Codex. Its tool traces, trigger scores, and behavior results describe
+Claude Code sessions; they do not validate native Codex skill activation.
+
 # skill-bench
 
 A benchmark harness for this repo's skills. Output is numbers you can compare
@@ -233,7 +239,7 @@ python3 skills/skill-bench/bench.py run <skill> [--model haiku] [--model sonnet]
   cutoff still leaves partial data. The harness detects rate-limit errors and
   stops early instead of burning the rest of the window.
 - Check the 5h window first if the run is large (> ~60 trials): read
-  `~/.claude/state/usage_snapshot.json` (claude-maxer keeps it fresh). If
+  `~/.claude/state/usage_snapshot.json` (sub-maxer keeps it fresh). If
   `rate_limits.five_hour.used_percentage` is ≥ 80, tell the user and offer a smaller run
   (`--only trigger`, `-k 1`, or `--split dev`).
 - Trials run in the repo root with write-capable tools disallowed (list in

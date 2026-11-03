@@ -9,6 +9,13 @@ description: >
   proxy: route mid-session to any backend without restart.
 ---
 
+## Agent compatibility
+
+This skill manages Claude Code’s proxy and settings. Codex can run the
+management scripts, but they do not change Codex’s own model or provider.
+Use the current agent’s available question tool for the picker below; if no
+question tool is available, ask the user in conversation.
+
 # Model Switch Proxy
 
 ## When to activate

@@ -2,14 +2,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
 
 const REPO_ROOT = __dirname;
 const REGISTRY_FILE = path.join(REPO_ROOT, 'registry.yaml');
-const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
-const GLOBAL_SKILLS = path.join(os.homedir(), '.claude', 'skills');
-const PROJECT_SKILLS = path.join(process.cwd(), '.claude', 'skills');
+let agent = process.env.LDN_AGENT || 'claude';
 
 // ANSI escape codes (no extra dependency)
 const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m' };
@@ -17,7 +15,7 @@ const C = { reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m', green: '\x1b[32m'
 const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
 
 function usage() {
-  console.log(`${C.bold}lidaning-skills${C.reset} ${C.dim}v${pkg.version}${C.reset} — manage your Claude Code skills
+  console.log(`${C.bold}lidaning-skills${C.reset} ${C.dim}v${pkg.version}${C.reset} — manage your Claude Code, Codex, and OpenCode skills
 
 ${C.bold}Usage:${C.reset}
   lidaning-skills [command] [options]
@@ -28,8 +26,10 @@ ${C.bold}Commands:${C.reset}
   ${C.cyan}remove, rm <name...>${C.reset}   Uninstall skill(s)
 
 ${C.bold}Options:${C.reset}
-  -g, --global              Install to ~/.claude/skills/ (all projects)
-  -p, --project             Install to ./.claude/skills/ (current project)
+  -g, --global              Install for all projects
+  -p, --project             Install for the current project
+  --agent <name>           claude (default), codex, both, opencode, or all
+  --codex                  Shorthand for --agent codex
   -v, --version             Show version
   -h, --help                Show this help
 
@@ -64,16 +64,6 @@ function loadMetadata(name) {
   return yaml.load(fs.readFileSync(metaFile, 'utf8'));
 }
 
-function resolveScope(name, flagScope) {
-  if (flagScope) return flagScope;
-  const meta = loadMetadata(name);
-  return meta ? meta.scope : 'global';
-}
-
-function installDir(scope) {
-  return scope === 'global' ? GLOBAL_SKILLS : PROJECT_SKILLS;
-}
-
 // --- list ---
 
 function cmdList() {
@@ -89,73 +79,39 @@ function cmdList() {
   console.log(`\n${C.dim}Repo: ${REPO_ROOT}${C.reset}`);
 }
 
-// --- add ---
-
-function cmdAdd(name, flagScope) {
-  const sp = skillPath(name);
-  if (!sp) {
-    console.error(`${C.red}Error:${C.reset} Skill '${name}' not found. Run ${C.bold}lidaning-skills ls${C.reset} to see available skills.`);
+// Keep paths, complete-package links and MCP handling in the shell installer.
+function runInstaller(names, flagScope, remove = false) {
+  const args = [...names, '--agent', agent];
+  if (flagScope) args.push(`--${flagScope}`);
+  if (remove) args.push('--remove');
+  const result = spawnSync(path.join(REPO_ROOT, 'install.sh'), args, { stdio: 'inherit' });
+  if (result.error) {
+    console.error(result.error.message);
     process.exit(1);
   }
-
-  const skillDir = path.join(REPO_ROOT, sp);
-  const skillMd = path.join(skillDir, 'SKILL.md');
-  if (!fs.existsSync(skillMd)) {
-    console.error(`${C.red}Error:${C.reset} No SKILL.md found in ${skillDir}`);
-    process.exit(1);
-  }
-
-  const scope = resolveScope(name, flagScope);
-  const targetDir = path.join(installDir(scope), name);
-  const scopeTag = scope === 'global' ? `${C.cyan}global${C.reset}` : `${C.yellow}project${C.reset}`;
-
-  fs.mkdirSync(targetDir, { recursive: true });
-
-  // Symlink SKILL.md
-  const realSkillMd = fs.realpathSync(skillMd);
-  const linkPath = path.join(targetDir, 'SKILL.md');
-  if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
-  fs.symlinkSync(realSkillMd, linkPath);
-
-  // Symlink supporting .md files (metadata.yaml, sessions.md, etc.)
-  let count = 0;
-  for (const f of fs.readdirSync(skillDir)) {
-    if (!f.endsWith('.md') || f === 'SKILL.md') continue;
-    const real = fs.realpathSync(path.join(skillDir, f));
-    const dest = path.join(targetDir, f);
-    if (fs.existsSync(dest)) fs.unlinkSync(dest);
-    fs.symlinkSync(real, dest);
-    count++;
-  }
-
-  console.log(`${C.green}Installed${C.reset} ${C.bold}${name}${C.reset} → ${targetDir} ${C.dim}[${scopeTag}${C.dim}]${C.reset} (SKILL.md + ${count} support files)`);
-}
-
-// --- remove ---
-
-function cmdRemove(name, flagScope) {
-  const sp = skillPath(name);
-  if (!sp) {
-    console.error(`${C.red}Error:${C.reset} Skill '${name}' not found.`);
-    process.exit(1);
-  }
-
-  const scope = resolveScope(name, flagScope);
-  const targetDir = path.join(installDir(scope), name);
-
-  if (!fs.existsSync(targetDir)) {
-    console.log(`${C.yellow}Not installed:${C.reset} ${targetDir}`);
-    return;
-  }
-
-  fs.rmSync(targetDir, { recursive: true, force: true });
-  console.log(`${C.green}Removed${C.reset} ${targetDir}`);
+  if (result.status !== 0) process.exit(result.status || 1);
 }
 
 // --- main ---
 
 function main() {
-  const args = process.argv.slice(2);
+  const args = [];
+  const raw = process.argv.slice(2);
+  for (let i = 0; i < raw.length; i++) {
+    const arg = raw[i];
+    if (arg === '--agent' || arg === '-a') {
+      if (!raw[i + 1]) { console.error('--agent requires a value'); process.exit(1); }
+      agent = raw[++i];
+    } else if (arg.startsWith('--agent=')) {
+      agent = arg.slice('--agent='.length);
+    } else if (arg === '--codex') {
+      agent = 'codex';
+    } else { args.push(arg); }
+  }
+  if (!['claude', 'codex', 'both', 'opencode', 'all'].includes(agent)) {
+    console.error(`Unknown agent: ${agent}`);
+    process.exit(1);
+  }
 
   if (args.length === 0) {
     cmdList();
@@ -203,14 +159,14 @@ function main() {
         console.error(`${C.red}Error:${C.reset} 'add' requires at least one skill name.`);
         process.exit(1);
       }
-      for (const n of names) cmdAdd(n, flagScope);
+      runInstaller(names, flagScope);
       break;
     case 'remove':
       if (names.length === 0) {
         console.error(`${C.red}Error:${C.reset} 'remove' requires at least one skill name.`);
         process.exit(1);
       }
-      for (const n of names) cmdRemove(n, flagScope);
+      runInstaller(names, flagScope, true);
       break;
     default:
       console.error(`${C.red}Unknown command:${C.reset} ${cmd}`);

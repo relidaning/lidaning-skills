@@ -12,7 +12,7 @@ description: >
   `list|pick|mark|news|optimize|review`. Also activate when the user wants
   to switch a queue task on or off (optimize, review, news, vault, or every
   scheduling/consuming task at once). An unattended caller
-  (claude-maxer) decides only when there is quota and asks it for work.
+  (sub-maxer) decides only when there is quota and asks it for work.
 argument-hint: "[tasks] [on|off <task|scheduling|consuming|all>... [--until T]] [model <task|type|all>... <id|default>]"
 ---
 
@@ -60,13 +60,13 @@ never finishes and exists to use up spare subscription quota. `next`
 returns it as `"type"`.
 
 **Models** (2026-10-15): each task names the model it runs on, and `next`
-returns it as `"model"`; claude-maxer's own `model` setting is only the
+returns it as `"model"`; sub-maxer's own `model` setting is only the
 fallback. News is searching and summarizing, so Sonnet; vault and review
 commit or merge unattended, so Opus; optimize only opens a PR that review
 checks, so Sonnet. Change one with `tasks_queue.py model optimize
 claude-opus-5-5` (`default` restores it). Haiku is refused, by the user's
 decision after a 2026-10-15 benchmark where Haiku skipped skills it should
-have called (claude-maxer triggered 0/30). Overrides are kept in
+have called (sub-maxer triggered 0/30). Overrides are kept in
 `~/.claude/state/tasks-queue-models.json`.
 
 **Switches.** Every task can be switched off (`tasks_queue.py off
@@ -74,7 +74,7 @@ optimize`, or `off consuming` for all of one type, optionally `--until 3d`)
 and `next` passes over it. Added 2026-10-15 because quota ran short while
 optimize and review kept running. State: `~/.claude/state/tasks-queue-switches.json`
 (lists only what is off; an expired `--until` switches back on). When
-everything left is off, `next` returns `{"kind": "idle"}` and claude-maxer
+everything left is off, `next` returns `{"kind": "idle"}` and sub-maxer
 ends the run instead of falling back to its own default tasks.
 
 - A `Tasks.md` task always goes first, whenever there is one.
@@ -153,7 +153,7 @@ marking it would split one user item into two checked lines (fixed
 ## Scheduling
 
 **This queue owns the order; the caller owns the clock.** `next` applies
-the [Priority](#priority) table. The caller (claude-maxer) decides whether
+the [Priority](#priority) table. The caller (sub-maxer) decides whether
 there is quota, and whether the returned task fits in what's left of the
 window: if a repo task (vault/review/optimize) is too big, it asks again with
 `--small` and gets news. It passes `--skip` for vault tasks it won't run
@@ -402,9 +402,9 @@ Papers also has a memory: every paper it proposes is stored in rag-chroma's
 `papers` collection, listed in the next prompt as already covered, and a
 repeat that slips through anyway (same arXiv ID, or the same paper reworded
 or linked elsewhere) is dropped before the note is written. Each new paper
-with an arXiv ID also has its PDF downloaded to `~/papers/` and uploaded to
-Nextcloud `papers/` (no summary note; papers without an arXiv ID are
-skipped). See claude-maxer's `maxer.py` (`PAPER_TASKS`, `save_pdfs`).
+with an arXiv ID also has its PDF uploaded to Nextcloud `papers/`, with no
+local copy kept (no summary note; papers without an arXiv ID are
+skipped). See sub-maxer's `maxer.py` (`PAPER_TASKS`, `save_pdfs`).
 
 ### Papers (daily)
 Find the 5 AI, machine learning and deep learning research papers most worth reading right now. Each must be either very important (a major lab's model or technique report, or a result the field is actively building on) or clearly trending in the last 7 days (high on Hugging Face Daily Papers, alphaXiv or arXiv trending, or widely discussed on X, Reddit or Hacker News). Prefer papers from the last 2 weeks; include an older paper only if it newly became important. At least one of the 5, listed last, must instead be a foundational paper of any year that shaped how AI, machine learning or deep learning developed (for example backpropagation, AlexNet, dropout, Adam, the Transformer, scaling laws); vary the era and area from day to day, and for it the "Chosen because" sentence names what later work it inspired. Link the arXiv abstract page (arxiv.org/abs/…) when there is one, otherwise the paper's official page. Use the first author's lab or the org as Source and the submission date as the date. The first sentence says what the paper does; the second starts with "Chosen because" and gives the reason with its evidence (e.g. upvote count, who released it, or who is discussing it).

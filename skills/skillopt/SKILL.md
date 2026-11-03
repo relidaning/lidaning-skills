@@ -12,6 +12,15 @@ description: >
   skill", "fix this typo").
 ---
 
+## Agent compatibility
+
+Use the current agent’s file, shell, and delegation tools when available.
+Claude tool names such as `Skill(...)` below describe the Claude integration;
+in Codex, read the selected SKILL.md and evaluate its use through Codex’s
+available tools. Existing `.claude/skillopt-runs/` paths are shared run data.
+The optional `skill-bench` runner still requires Claude Code and measures
+Claude sessions, not Codex behavior.
+
 # SkillOpt
 
 Adapts the loop from arXiv:2605.23904 ("SkillOpt: Executive Strategy for
@@ -53,7 +62,7 @@ not marked `(n.s.)`. Never read `test` cases while editing (leakage).
   is scored against that direction.
 - **General audit**: no direction given. Falls back to the existing
   CLAUDE.md rubric — Trigger Clarity (0–5) + Body Quality (0–5), threshold
-  ≥8/10 — the same check `claude-maxer`'s `skill-audit` work type has been
+  ≥8/10 — the same check `sub-maxer`'s `skill-audit` work type has been
   running ad hoc. This mode skips probe generation (the rubric is already a
   holistic score) and goes straight to bounded-edit + validation-gate.
 
@@ -200,12 +209,12 @@ its own; that's the user's call, same as everywhere else in this repo.
 | Validator                   | fresh `general-purpose` subagent, foreground |
 | Round boundary              | longitudinal compare + `meta-notes.md` |
 
-## Relationship to claude-maxer's skill-audit
+## Relationship to sub-maxer's skill-audit
 
-`claude-maxer`'s unattended loop has been running the general-audit rubric
+`sub-maxer`'s unattended loop has been running the general-audit rubric
 by hand (per CLAUDE.md's SkillOpt section) as one of its random work types.
 General-audit mode here is that same rubric, now invokable on demand instead
-of only when the random picker lands on it — `claude-maxer` can keep doing
+of only when the random picker lands on it — `sub-maxer` can keep doing
 its own thing, or call this skill for the audit step; either is fine.
 
 ## Guardrails

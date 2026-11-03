@@ -40,6 +40,7 @@ immediately (installed skills are symlinks).
 
 <!-- ALLOWED_DIRS:BEGIN -->
 - `papers/`
+- `lidaning/beijing self-taught exams/`
 <!-- ALLOWED_DIRS:END -->
 
 Enforcement rules:

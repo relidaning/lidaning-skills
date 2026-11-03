@@ -6,6 +6,12 @@ description: >
   index. ChromaDB + ONNX semantic search pipeline with Obsidian vault sync.
 ---
 
+## Agent compatibility
+
+Use the current agent’s available MCP tools for the `rag` server. Tool
+prefixes vary between Claude Code and Codex; discover them by capability.
+Resolve bundled scripts relative to this loaded skill directory.
+
 ## When to activate
 
 Invoke this skill when:
@@ -53,7 +59,7 @@ data that isn't vault notes and are never touched by the watcher:
 
 | Collection | Owner | Contents |
 |---|---|---|
-| `papers` | claude-maxer's daily Papers task | One entry per proposed paper; id `arxiv:<id>` or the bare URL; metadata `title, url, source, date, proposed, kind` (`recent`/`foundational`) |
+| `papers` | sub-maxer's daily Papers task | One entry per proposed paper; id `arxiv:<id>` or the bare URL; metadata `title, url, source, date, proposed, kind` (`recent`/`foundational`) |
 
 To answer "which papers have you proposed about X?", `rag_search` with
 `collection: "papers"`; to list them all, `rag_list`.

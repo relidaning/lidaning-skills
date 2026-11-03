@@ -312,7 +312,7 @@ def _search(name: str, query: str, k: int, mode: str = "hybrid") -> list[dict]:
     (default) by reciprocal rank fusion of both lists, so a chunk found by
     either can surface and one found by both ranks highest. Whatever the
     ranking, `score` is the cosine similarity of query and chunk, so a
-    threshold on it (e.g. claude-maxer's paper dedup) means the same thing
+    threshold on it (e.g. sub-maxer's paper dedup) means the same thing
     in every mode.
     """
     if mode not in ("hybrid", "vector", "keyword"):

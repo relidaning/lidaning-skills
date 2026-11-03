@@ -10,11 +10,14 @@ REGISTRY="$SKILLS_DIR/registry.yaml"
 # working when that compatibility layer is turned off.
 GLOBAL_SKILLS="$HOME/.claude/skills"
 PROJECT_SKILLS=".claude/skills"
+CODEX_GLOBAL_SKILLS="$HOME/.agents/skills"
+CODEX_PROJECT_SKILLS=".agents/skills"
+CODEX_CONFIG="${CODEX_HOME:-$HOME/.codex}"
 OPENCODE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 OC_GLOBAL_SKILLS="$OPENCODE_CONFIG/skills"
 OC_PROJECT_SKILLS=".opencode/skills"
 
-# Which agent(s) to install for: claude, opencode, or all
+# Which agent(s) to install for: claude, codex, both, opencode, or all
 AGENT="${LDN_AGENT:-claude}"
 
 RED='\033[0;31m'
@@ -32,9 +35,10 @@ Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [-
 
   --global      Install to the agent's global skills dir (all projects)
   --project     Install to the agent's project skills dir (this repo only)
-  --agent A     claude (default), opencode, or all; also settable via LDN_AGENT
+  --agent A     claude (default), codex, both (Claude + Codex), opencode, or all; also settable via LDN_AGENT
+  --codex       Shorthand for --agent codex
   --opencode    Shorthand for --agent opencode
-  --mcp-only    Only register the skills' MCP servers (used by `ldn mcp inject`)
+  --mcp-only    Only register the skills' MCP servers (used by ldn mcp inject)
   --remove      Uninstall the skill
   --list        List all available skills
   --installed   Show install status of each skill (global/project)
@@ -42,6 +46,8 @@ Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [-
 Examples:
   install.sh english-practice --global
   install.sh memory-orchestrate --project
+  install.sh english-practice --project --agent codex
+  install.sh english-practice --global --agent both
   install.sh --remove english-practice --global
   install.sh english-practice --project --agent opencode
   install.sh --list
@@ -49,10 +55,12 @@ Examples:
 
 Skill dirs:
   claude    global ~/.claude/skills/            project .claude/skills/
+  codex     global ~/.agents/skills/            project .agents/skills/
   opencode  global ~/.config/opencode/skills/   project .opencode/skills/
 
 MCP servers (skills that ship mcp.json):
   claude    global ~/.claude/settings.json      project .mcp.json + .claude/settings.local.json
+  codex     global $CODEX_CONFIG/config.toml     project .codex/config.toml
   opencode  global ~/.config/opencode/opencode.json[c]   project opencode.json[c]
 EOF
   exit 0
@@ -106,9 +114,10 @@ list_skills() {
 
 agents() {
   case "$AGENT" in
-    claude|opencode) echo "$AGENT" ;;
-    all)             echo "claude opencode" ;;
-    *) err "Unknown agent '$AGENT' (expected claude, opencode or all)" >&2; exit 1 ;;
+    claude|codex|opencode) echo "$AGENT" ;;
+    both)            echo "claude codex" ;;
+    all)             echo "claude codex opencode" ;;
+    *) err "Unknown agent '$AGENT' (expected claude, codex, both, opencode or all)" >&2; exit 1 ;;
   esac
 }
 
@@ -117,6 +126,8 @@ skills_root() {
   case "$agent:$scope" in
     claude:global)    echo "$GLOBAL_SKILLS" ;;
     claude:*)         echo "$PROJECT_SKILLS" ;;
+    codex:global)     echo "$CODEX_GLOBAL_SKILLS" ;;
+    codex:*)          echo "$CODEX_PROJECT_SKILLS" ;;
     opencode:global)  echo "$OC_GLOBAL_SKILLS" ;;
     opencode:*)       echo "$OC_PROJECT_SKILLS" ;;
   esac
@@ -143,16 +154,18 @@ install_status() {
 list_installed() {
   echo "Skill install status:"
   echo ""
-  printf "  %-25s %-10s %-10s %-10s %-10s\n" "SKILL" "GLOBAL" "PROJECT" "OC-GLOBAL" "OC-PROJECT"
+  printf "  %-25s %-10s %-10s %-10s %-10s %-12s %-12s\n" "SKILL" "GLOBAL" "PROJECT" "OC-GLOBAL" "OC-PROJECT" "CODEX-GLOBAL" "CODEX-PROJECT"
   while IFS= read -r line; do
     if [[ "$line" =~ ^\ *-\ name: ]]; then
       local name="${line#*: }"
       read -r path_line
-      printf "  %-25s %-10s %-10s %-10s %-10s\n" "$name" \
+      printf "  %-25s %-10s %-10s %-10s %-10s %-12s %-12s\n" "$name" \
         "$(install_status "$GLOBAL_SKILLS/$name/SKILL.md")" \
         "$(install_status "$PROJECT_SKILLS/$name/SKILL.md")" \
         "$(install_status "$OC_GLOBAL_SKILLS/$name/SKILL.md")" \
-        "$(install_status "$OC_PROJECT_SKILLS/$name/SKILL.md")"
+        "$(install_status "$OC_PROJECT_SKILLS/$name/SKILL.md")" \
+        "$(install_status "$CODEX_GLOBAL_SKILLS/$name/SKILL.md")" \
+        "$(install_status "$CODEX_PROJECT_SKILLS/$name/SKILL.md")"
     fi
   done < "$REGISTRY"
 }
@@ -310,6 +323,22 @@ with open(cfg_file, "w") as f:
 PYEOF
 }
 
+agent_mcp() {
+  local action="$1" agent="$2" mcp_json="$3" scope="$4"
+  case "$agent" in
+    codex)
+      local cfg=".codex/config.toml"
+      [[ "$scope" == "global" ]] && cfg="$CODEX_CONFIG/config.toml"
+      python3 "$SKILLS_DIR/scripts/codex_mcp.py" "$action" "$cfg" "$mcp_json"
+      ;;
+    opencode) opencode_mcp "$action" "$mcp_json" "$scope" ;;
+    claude)
+      if [[ "$action" == "add" ]]; then merge_mcp_config "$mcp_json" "$scope"
+      else remove_mcp_config "$mcp_json" "$scope"; fi
+      ;;
+  esac
+}
+
 install_skill() {
   local name="$1"
   local scope_override="${2:-}"
@@ -324,48 +353,26 @@ install_skill() {
   local scope="${scope_override:-$(skill_scope "$skill_dir")}"
   local install_dir=$(skills_root "$agent" "$scope")
 
-  # --mcp-only (used by `ldn mcp inject`): register MCP servers, link nothing
+  # --mcp-only (used by ldn mcp inject): register MCP servers, link nothing
   if $MCP_ONLY; then
     if [[ -f "$skill_dir/mcp.json" ]]; then
-      if [[ "$agent" == "opencode" ]]; then
-        opencode_mcp add "$skill_dir/mcp.json" "$scope"
-      else
-        merge_mcp_config "$skill_dir/mcp.json" "$scope"
-      fi
+      agent_mcp add "$agent" "$skill_dir/mcp.json" "$scope"
       log "Registered MCP server(s) from $name [$agent]"
     fi
     return 0
   fi
 
-  # Skills are directories (same layout for Claude Code and OpenCode): skills/<name>/SKILL.md
-  # Symlink skill.md as SKILL.md, plus all supporting .md files
+  # Link the entire package so relative scripts, references and assets work.
   local link_dir="$install_dir/${name}"
-  mkdir -p "$link_dir"
-
-  # Always symlink the main skill file
-  if [[ ! -f "$skill_dir/SKILL.md" ]]; then
-    err "No SKILL.md found in $skill_dir"
-    exit 1
-  fi
-  ln -sf "$(realpath "$skill_dir/SKILL.md")" "$link_dir/SKILL.md"
-
-  # Symlink supporting .md files (sessions.md, todos.md, etc.)
-  for f in "$skill_dir"/*.md; do
-    [[ -f "$f" ]] || continue
-    local base=$(basename "$f")
-    [[ "$base" == "SKILL.md" ]] && continue  # already linked above
-    ln -sf "$(realpath "$f")" "$link_dir/$base"
-  done
+  [[ -f "$skill_dir/SKILL.md" ]] || { err "No SKILL.md found in $skill_dir"; exit 1; }
+  mkdir -p "$install_dir"
+  python3 "$SKILLS_DIR/scripts/link_skill.py" "$skill_dir" "$link_dir"
 
   log "Linked $name -> $link_dir/ [$agent]"
 
   # Register MCP server if skill ships one
   if [[ -f "$skill_dir/mcp.json" ]]; then
-    if [[ "$agent" == "opencode" ]]; then
-      opencode_mcp add "$skill_dir/mcp.json" "$scope"
-    else
-      merge_mcp_config "$skill_dir/mcp.json" "$scope"
-    fi
+    agent_mcp add "$agent" "$skill_dir/mcp.json" "$scope"
     log "Registered MCP server(s) from $name [$agent]"
   fi
 }
@@ -383,7 +390,10 @@ remove_skill() {
   local install_dir=$(skills_root "$agent" "$scope")
 
   local link_dir="$install_dir/${name}"
-  if [[ -d "$link_dir" ]]; then
+  if [[ -L "$link_dir" ]]; then
+    rm "$link_dir"
+    log "Removed $link_dir"
+  elif [[ -d "$link_dir" ]]; then
     rm -rf "$link_dir"
     log "Removed $link_dir"
   else
@@ -392,11 +402,7 @@ remove_skill() {
 
   # Deregister MCP server if skill ships one
   if [[ -f "$skill_dir/mcp.json" ]]; then
-    if [[ "$agent" == "opencode" ]]; then
-      opencode_mcp remove "$skill_dir/mcp.json" "$scope"
-    else
-      remove_mcp_config "$skill_dir/mcp.json" "$scope"
-    fi
+    agent_mcp remove "$agent" "$skill_dir/mcp.json" "$scope"
     log "Removed MCP server(s) from $name [$agent]"
   fi
 }
@@ -413,8 +419,9 @@ while [[ $# -gt 0 ]]; do
     --global)   SCOPE="global"; shift ;;
     --project)  SCOPE="project"; shift ;;
     --remove)   REMOVE=true; shift ;;
-    --agent)    AGENT="${2:?--agent needs claude, opencode or all}"; shift 2 ;;
+    --agent)    AGENT="${2:?--agent needs claude, codex, both, opencode or all}"; shift 2 ;;
     --agent=*)  AGENT="${1#*=}"; shift ;;
+    --codex)    AGENT="codex"; shift ;;
     --opencode) AGENT="opencode"; shift ;;
     --mcp-only) MCP_ONLY=true; shift ;;
     --list)     list_skills; exit 0 ;;

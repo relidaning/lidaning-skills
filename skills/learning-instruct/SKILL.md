@@ -85,7 +85,7 @@ besmart at all. Don't auto-pick — let the user choose.
 
 **Read the project first** to understand what the user is working on. Look at:
 
-- `CLAUDE.md` — project overview and skills
+- `AGENTS.md` (Codex) / `CLAUDE.md` (Claude Code) — project overview and skills
 - `.claude/SESSION.md` (or root `SESSION.md`) — recent goals and current state
 - `.claude/MEMORIES.md` — user preferences
 - `git log --oneline -10` — recent commits and what's been built
@@ -294,7 +294,7 @@ a part is in progress).
 
 When the user provides a URL or document during a learning track:
 
-1. Fetch and read the resource (use WebFetch for URLs, Read for local files)
+1. Fetch and read the resource (use the available web fetch tool for URLs and file reader for local files)
 2. Generate a summary file — source content only, no added knowledge
 3. Generate an updated DOCUMENTATIONS.md index entry
 4. Hand both to memory-orchestrate for recording

@@ -473,7 +473,7 @@ def task_on(name, off=None):
 
 
 def parse_until(s, now):
-    """2h, 3d, 30m, HH:MM, YYYY-MM-DD or 'YYYY-MM-DD HH:MM' (as claude-maxer)."""
+    """2h, 3d, 30m, HH:MM, YYYY-MM-DD or 'YYYY-MM-DD HH:MM' (as sub-maxer)."""
     m = re.fullmatch(r"(\d+)\s*([mhd])", s.strip())
     if m:
         return now + int(m[1]) * {"m": 60, "h": 3600, "d": 86400}[m[2]]
@@ -527,7 +527,7 @@ def cmd_model(args):
     *names, model = args
     if "haiku" in model.lower():
         # The user's call (2026-10-15): a Haiku benchmark run skipped skills
-        # it should have called (claude-maxer 0/30), so no task runs on it.
+        # it should have called (sub-maxer 0/30), so no task runs on it.
         raise SystemExit("Haiku is not an option for queue tasks (user's decision, 2026-10-15)")
     picked = pick_tasks(names)
     try:

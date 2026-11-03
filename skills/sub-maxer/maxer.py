@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-claude-maxer engine. It reads its settings and task list from SKILL.md (next
+sub-maxer engine. It reads its settings and task list from SKILL.md (next
 to this file) on every run, so editing the skill changes what runs. This file
 holds only the mechanics a model can't be trusted with: reading usage, timing
 against the 5h reset, never opening an off-schedule window, and writing to the
@@ -50,7 +50,9 @@ Commands (cron runs them through run_maxer_work.sh, which sets HOME/PATH/proxy):
           --until like `off`.
 
 Vault output (written only when tasks run), under the vault root:
-  claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task
+  claude-maxer/news/YYYY-MM-DD.md   one "## HH:MM · Task" section per task; the
+                                    last 7 days only, older notes move to
+                                    news/archive/YYYY-MM/ whenever `run` starts
   claude-maxer/log/YYYY-MM-DD.md    one block per run, one line per task
   claude-maxer/optimize/<app>.md    one dated report per optimize or review task
 Checks, skips and pings go only to ~/.claude/state/claude-maxer.log.jsonl.
@@ -125,6 +127,7 @@ TASKS = []  # [(slug, title, prompt)], loaded from SKILL.md
 QUEUE_SCRIPT = os.path.join(SKILL_DIR, "..", "tasks-queue", "tasks_queue.py")
 QUEUE_TIMEOUT_S = 90         # the vault container has hung before; never wait on it long
 DAILY_LOOKBACK_DAYS = 7     # a daily-pinned task skips titles from the past week, not just today
+NEWS_KEEP_DAYS = 7          # daily news notes kept in news/; older ones move to news/archive/YYYY-MM/
 VAULT_TASK_ROOT = "/data/apps"  # repos a vault task may target
 VAULT_FAILS_PATH = os.path.join(STATE_DIR, "claude-maxer-vault-fails.json")
 MAX_VAULT_ATTEMPTS = 2       # then skip that task until the user edits it
@@ -511,7 +514,7 @@ def news_source():
                 return tasks, "tasks-queue", {t["title"] for t in listed if t.get("daily")}
         except (ValueError, KeyError, TypeError):
             pass
-    return TASKS, "claude-maxer defaults", set()
+    return TASKS, "sub-maxer defaults", set()
 
 
 def read_fails():
@@ -586,7 +589,7 @@ def branch_ts(repo, branch):
         return 0.0
 
 
-VAULT_PROMPT = """You are running unattended for claude-maxer. A task from the user's Obsidian \
+VAULT_PROMPT = """You are running unattended for sub-maxer. A task from the user's Obsidian \
 vault Tasks.md reads:
 
 "{task}"
@@ -668,7 +671,7 @@ def run_optimize_task(task, deadline):
     body = reply or f"_No report: {why}_"
     vault_append(f"claude-maxer/optimize/{app}.md",
                  f"\n## {datetime.fromtimestamp(started):%Y-%m-%d %H:%M} · {status}\n\n{body}\n",
-                 heading=f"# Optimize — {app}\n\n`{path}` · one report per claude-maxer "
+                 heading=f"# Optimize — {app}\n\n`{path}` · one report per sub-maxer "
                          f"visit, newest last.\n")
     return res
 
@@ -721,7 +724,7 @@ def run_review_task(task, deadline):
     vault_append(f"claude-maxer/optimize/{app}.md",
                  f"\n## {datetime.fromtimestamp(started):%Y-%m-%d %H:%M} · review · "
                  f"{res.get('error') or summary}\n\n{body}\n",
-                 heading=f"# Optimize — {app}\n\n`{path}` · one report per claude-maxer "
+                 heading=f"# Optimize — {app}\n\n`{path}` · one report per sub-maxer "
                          f"visit, newest last.\n")
     return res
 
@@ -779,13 +782,53 @@ def note_path(day):
     return f"claude-maxer/news/{day}.md"
 
 
+def archived_path(day):
+    return f"claude-maxer/news/archive/{day[:7]}/{day}.md"
+
+
+def archive_news(now):
+    """Move daily news notes older than NEWS_KEEP_DAYS (today included) into
+    news/archive/YYYY-MM/, and repoint the log notes' [[news/day]] links."""
+    keep_from = (datetime.fromtimestamp(now) - timedelta(days=NEWS_KEEP_DAYS - 1)).strftime("%Y-%m-%d")
+    news_dir = os.path.join(VAULT_ROOT, "claude-maxer/news")
+    moved = []
+    for name in sorted(os.listdir(news_dir)) if os.path.isdir(news_dir) else []:
+        day = name[:-3]
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}\.md", name) or day >= keep_from:
+            continue
+        dest = os.path.join(VAULT_ROOT, archived_path(day))
+        if os.path.exists(dest):
+            log("archive_error", file=name, error="already archived")
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        os.rename(os.path.join(news_dir, name), dest)
+        moved.append(day)
+    for day in moved:
+        log_file = os.path.join(VAULT_ROOT, log_note(day))
+        try:
+            with open(log_file) as f:
+                text = f.read()
+            new = text.replace(f"[[{note_path(day)[:-3]}|", f"[[{archived_path(day)[:-3]}|")
+            if new != text:
+                with open(log_file, "w") as f:
+                    f.write(new)
+        except OSError:
+            pass
+    if moved:
+        log("news_archived", days=moved)
+    return moved
+
+
 def covered_titles(path, days=1):
     """Titles already in today's note (and the `days - 1` notes before it),
     so a later task doesn't repeat them."""
     day = datetime.strptime(os.path.basename(path)[:-3], "%Y-%m-%d")
     titles = []
     for i in range(days):
-        p = note_path((day - timedelta(days=i)).strftime("%Y-%m-%d"))
+        d = (day - timedelta(days=i)).strftime("%Y-%m-%d")
+        p = note_path(d)
+        if not os.path.exists(os.path.join(VAULT_ROOT, p)):
+            p = archived_path(d)
         try:
             with open(os.path.join(VAULT_ROOT, p)) as f:
                 titles += re.findall(r"\*\*\[([^\]]+)\]\(", f.read())
@@ -821,7 +864,7 @@ def vault_decision(now, u, line):
                 f"(7d {b['seven_start']}% → ceiling {b['ceiling']}%, "
                 f"{b['days_left']} days to the weekly reset)\n\n")
     vault_append(log_note(day), head + line + "\n",
-                 heading=f"# claude-maxer log — {day}\n\nEvery scheduled open/run decision, "
+                 heading=f"# sub-maxer log — {day}\n\nEvery scheduled open/run decision, "
                          f"and every task. News lands in claude-maxer/news/.\n")
 
 
@@ -925,7 +968,7 @@ def run_task(slug, title, prompt, day, deadline, lookback=1, model=None):
         if not ENTRY.findall(body):
             res["error"] = f"all {len(repeats)} papers were already proposed"
             return res
-    heading = f"# News — {day}\n\nCollected by claude-maxer, one section per task.\n"
+    heading = f"# News — {day}\n\nCollected by sub-maxer, one section per task.\n"
     try:
         vault_append(path, f"\n## {hm(started)} · {title}\n\n{body}\n", heading=heading)
     except Exception as e:
@@ -1048,14 +1091,15 @@ def store_papers(docs):
 
 
 # ── paper PDFs ─────────────────────────────────────────────────────────────
-# Each newly proposed paper with an arXiv ID is downloaded to ~/papers/ and
-# uploaded to Nextcloud papers/, with the same file naming as the paper-fetch
-# skill. Plain HTTP from this process, since the news session has only web
-# tools. Best-effort: a failure is logged and never fails the task. Papers
-# without an arXiv ID are skipped, and no summary note is written (that needs
-# a model; paper-fetch does it on request).
+# Each newly proposed paper with an arXiv ID is uploaded to Nextcloud papers/,
+# with the same file naming as the paper-fetch skill. Nextcloud is the only
+# copy: the PDF is uploaded straight from memory, nothing is kept on disk
+# (the local ~/papers/ cache was dropped 2026-10-26, the user's call).
+# Plain HTTP from this process, since the news session has only web tools.
+# Best-effort: a failure is logged and never fails the task. Papers without an
+# arXiv ID are skipped, and no summary note is written (that needs a model;
+# paper-fetch does it on request).
 
-PAPERS_DIR = os.path.expanduser("~/papers")
 NC_PAPERS_DIR = "papers"  # a folder the nextcloud skill's allowlist permits
 NC_ENV_FILE = os.path.expanduser("~/.zshrc.local")
 PDF_MIN_BYTES = 10 * 1024  # arXiv can serve an HTML error page with HTTP 200
@@ -1109,57 +1153,55 @@ def pdf_name(arxid, title):
     return f"{arxid} - {' '.join(title.split())[:150]}.pdf"
 
 
-def nextcloud_put(local, name):
-    """Upload unless a file of that name is already there."""
+def nextcloud_request(name, method, data=None):
+    """One WebDAV request on papers/<name>."""
     import base64
-    import urllib.error
     import urllib.parse
     import urllib.request
     host, user, password = nextcloud_env()
     url = (f"{host}/remote.php/dav/files/{urllib.parse.quote(user)}/"
            f"{NC_PAPERS_DIR}/{urllib.parse.quote(name)}")
-    auth = {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+    headers = {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
+    if data is not None:
+        headers["Content-Type"] = "application/pdf"
     # Nextcloud is local; the xray proxy can't reach it.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(urllib.request.Request(url, data=data, method=method, headers=headers),
+                       timeout=PDF_TIMEOUT_S)
+
+
+def nextcloud_has(name):
+    import urllib.error
     try:
-        opener.open(urllib.request.Request(url, method="HEAD", headers=auth), timeout=30)
-        return
+        nextcloud_request(name, "HEAD")
+        return True
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
-    with open(local, "rb") as f:
-        opener.open(urllib.request.Request(url, data=f.read(), method="PUT", headers={
-            **auth, "Content-Type": "application/pdf"}), timeout=PDF_TIMEOUT_S)
+        return False
 
 
 def save_pdfs(docs):
     """Download and upload the PDFs of `docs` (the new papers). Returns
     {"saved": n, "failed": n, "skipped": n}; skipped = no arXiv ID."""
-    import glob
     import urllib.request
     ids = {d["id"][6:]: d["metadata"]["title"] for d in docs if d["id"].startswith("arxiv:")}
     out = {"saved": 0, "failed": 0, "skipped": len(docs) - len(ids)}
     if not ids:
         return out
     titles = arxiv_titles(list(ids))
-    os.makedirs(PAPERS_DIR, exist_ok=True)
     for arxid, headline in ids.items():
         try:
-            have = glob.glob(os.path.join(PAPERS_DIR, glob.escape(arxid) + " - *.pdf"))
-            local = have[0] if have else os.path.join(
-                PAPERS_DIR, pdf_name(arxid, titles.get(arxid, headline)))
-            if not have:
+            name = pdf_name(arxid, titles.get(arxid, headline))
+            if not nextcloud_has(name):
                 req = urllib.request.Request(f"https://arxiv.org/pdf/{arxid}",
-                                             headers={"User-Agent": "claude-maxer/1.0"})
+                                             headers={"User-Agent": "sub-maxer/1.0"})
                 with urllib.request.urlopen(req, timeout=PDF_TIMEOUT_S) as r:
                     data = r.read()
                 if not data.startswith(b"%PDF") or len(data) < PDF_MIN_BYTES:
                     raise RuntimeError(f"not a PDF ({len(data)} bytes)")
-                with open(local + ".part", "wb") as f:
-                    f.write(data)
-                os.replace(local + ".part", local)
+                nextcloud_request(name, "PUT", data)
                 time.sleep(3)  # be polite to arXiv
-            nextcloud_put(local, os.path.basename(local))
             out["saved"] += 1
         except Exception as e:
             out["failed"] += 1
@@ -1177,6 +1219,14 @@ def cmd_run(dry_run):
             print("another run is in progress")
             return 0
         os.makedirs(WORK_DIR, exist_ok=True)
+        # Before the usage gates: a run skipped for quota still tidies, since
+        # moving files costs none.
+        if not dry_run:
+            try:
+                archive_news(time.time())
+            except OSError as e:
+                log("archive_error", error=str(e)[:200])
+
         u = fresh_usage()
         ok, why = gate(u, time.time())
         if not ok:
@@ -1494,7 +1544,7 @@ def cmd_status():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="claude-maxer")
+    ap = argparse.ArgumentParser(description="sub-maxer")
     ap.add_argument("command", choices=["tick", "run", "open", "status", "show", "off", "on", "weekly", "b2b"])
     ap.add_argument("state", nargs="?", choices=["on", "off"], help="with weekly or b2b")
     ap.add_argument("--dry-run", action="store_true")

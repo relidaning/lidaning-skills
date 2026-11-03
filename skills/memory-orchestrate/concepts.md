@@ -1,7 +1,9 @@
 # Core concepts (CLAUDE.md → Key Concepts)
 
 The project's core concepts live in the **Key Concepts** section of the
-project-root `CLAUDE.md`, because that file is loaded into every session —
+project-root agent instructions (`AGENTS.md` for Codex, `CLAUDE.md` for
+Claude Code, or the project's existing shared concepts file), because that
+entrypoint is loaded into each session —
 a concept written there is recalled automatically, one written anywhere
 else has to be looked up. The `SessionEnd` hook writes to the same place.
 

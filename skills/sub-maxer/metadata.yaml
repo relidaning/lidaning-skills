@@ -1,4 +1,4 @@
-name: claude-maxer
+name: sub-maxer
 description: Pins the 5h usage window to 03/08/13/18 daily and fills each window to ~95% in its last hour with news digests logged to the vault, paced by the weekly cap.
 scope: project
 tags: [usage, quota, schedule, cron, pro-plan]

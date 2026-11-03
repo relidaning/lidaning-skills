@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-SKILL = Path(__file__).resolve().parents[1] / "skills/claude-maxer"
+SKILL = Path(__file__).resolve().parents[1] / "skills/sub-maxer"
 
 
 def load(name):

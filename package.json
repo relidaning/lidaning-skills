@@ -1,7 +1,7 @@
 {
   "name": "lidaning-skills",
   "version": "1.0.0",
-  "description": "Personal Claude Code skills manager",
+  "description": "Personal Claude Code, Codex, and OpenCode skills manager",
   "bin": {
     "lidaning-skills": "./cli.js"
   },

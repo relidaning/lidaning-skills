@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-claude-maxer OAuth usage fetcher (primary, headless-safe).
+sub-maxer OAuth usage fetcher (primary, headless-safe).
 
 Queries https://api.anthropic.com/api/oauth/usage with the Claude Code
 OAuth token from ~/.claude/.credentials.json — the same endpoint the CLI's
@@ -74,7 +74,7 @@ def refresh_access_token(opener, creds):
         ).encode(),
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "claude-maxer/fetch_usage_oauth",
+            "User-Agent": "sub-maxer/fetch_usage_oauth",
         },
     )
     with opener.open(req, timeout=30) as r:
@@ -170,7 +170,7 @@ def main():
                 "Authorization": f"Bearer {tok}",
                 "anthropic-beta": "oauth-2025-04-20",
                 "Content-Type": "application/json",
-                "User-Agent": "claude-maxer/fetch_usage_oauth",
+                "User-Agent": "sub-maxer/fetch_usage_oauth",
             },
         )
         with opener.open(req, timeout=30) as r:
