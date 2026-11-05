@@ -12,13 +12,13 @@ hang while its /healthz stays OK, hence the short timeout.
 
 import json
 import logging
-import os
+from rag_config import CONFIG
 import threading
 
 import httpx
 
-URL = os.getenv("VAULT_MCP_URL", "http://127.0.0.1:27125/mcp")
-TIMEOUT = float(os.getenv("VAULT_MCP_TIMEOUT", "30"))
+URL = CONFIG["VAULT_MCP_URL"]
+TIMEOUT = CONFIG["VAULT_MCP_TIMEOUT"]
 BATCH = 10  # read_multiple_notes accepts at most 10 paths
 
 _log = logging.getLogger(__name__)

@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE}
 
 WORKDIR /app
 
@@ -10,20 +11,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 # baked into the image so startup needs no network.
 # http_proxy/https_proxy come in as build args from docker-compose.yml.
 ARG E5_REPO=Xenova/multilingual-e5-small
+ARG E5_REVISION=main
+ARG E5_MODEL_FILE=model_quantized.onnx
 RUN mkdir -p /models/multilingual-e5-small && cd /models/multilingual-e5-small && \
-    for f in onnx/model_quantized.onnx tokenizer.json config.json; do \
-      curl -fsSL --retry 3 -o "$(basename $f)" "https://huggingface.co/$E5_REPO/resolve/main/$f"; \
+    for f in onnx/$E5_MODEL_FILE tokenizer.json config.json; do \
+      curl -fsSL --retry 3 -o "$(basename $f)" "https://huggingface.co/$E5_REPO/resolve/$E5_REVISION/$f"; \
     done
 
-COPY requirements.txt .
+COPY rag-mcp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py chunker.py bm25.py embedder.py vault_client.py audit.py web.py ./
-COPY static ./static
+COPY config.toml /config.toml
+COPY rag-mcp/*.py ./
+COPY rag-mcp/static ./static
+ENV RAG_LOG_DIR=/skill/logs
 
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -sf --max-time 4 http://localhost:8081/health > /dev/null || exit 1
+    CMD python -c "from rag_config import CONFIG; import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:%s/health' % CONFIG['RAG_PORT'], timeout=4).close()" || exit 1
 
 CMD ["python", "server.py"]

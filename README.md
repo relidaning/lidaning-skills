@@ -17,6 +17,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | `nextcloud` | project | Work with files in the self-hosted Nextcloud via MCP (WebDAV): list, read, upload, download, move, copy, delete, search. |
 | `skill-bench` | project | Benchmark a skill: frozen, versioned trigger + behavior suites; headless trials; F1, rubric scores, pass@k, CIs, run history. |
 | `git-rules` | global | Personal git/GitHub rules: delete a branch once its PR is merged, repo settings, session notes. New rules are added here instead of the global CLAUDE.md. |
+| `project-rules` | global | Portable configuration and a technology map for projects with executable scripts/services. Load before applicable engineering work. |
 
 ## Quick start
 

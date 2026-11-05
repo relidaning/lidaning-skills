@@ -10,7 +10,7 @@ text; the Chroma embedding-function call (used when Chroma embeds documents
 on add/upsert) applies the passage prefix, and embed_query() the query one.
 """
 
-import os
+from rag_config import CONFIG
 from pathlib import Path
 
 import numpy as np
@@ -18,13 +18,13 @@ import onnxruntime as ort
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from tokenizers import Tokenizer
 
-MODEL_DIR = Path(os.getenv("EMBED_MODEL_DIR", "/models/multilingual-e5-small"))
+MODEL_DIR = Path(CONFIG["EMBED_MODEL_DIR"])
 # int8-quantized export: fp32 with 16-text batches held ~1.7GB resident after
 # a re-index; int8, batches of 4 and no ONNX memory arena hold ~0.5GB
 # (measured 2026-09-29).
-MODEL_ID = "multilingual-e5-small-int8"
-MAX_TOKENS = 512
-BATCH = 4
+MODEL_ID = CONFIG["EMBED_MODEL_ID"]
+MAX_TOKENS = CONFIG["EMBED_MAX_TOKENS"]
+BATCH = CONFIG["EMBED_BATCH"]
 
 
 class E5Embedder(EmbeddingFunction[Documents]):
@@ -37,12 +37,12 @@ class E5Embedder(EmbeddingFunction[Documents]):
         self._count.no_truncation()
         self._count.no_padding()
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads = int(os.getenv("EMBED_THREADS", "4"))
+        opts.intra_op_num_threads = CONFIG["EMBED_THREADS"]
         # The arena keeps the largest batch's buffers allocated forever
         opts.enable_cpu_mem_arena = False
         opts.enable_mem_pattern = False
         self._sess = ort.InferenceSession(
-            str(model_dir / "model_quantized.onnx"), opts, providers=["CPUExecutionProvider"])
+            str(model_dir / CONFIG["EMBED_MODEL_FILE"]), opts, providers=["CPUExecutionProvider"])
         self._inputs = {i.name for i in self._sess.get_inputs()}
 
     def __call__(self, input: Documents) -> Embeddings:

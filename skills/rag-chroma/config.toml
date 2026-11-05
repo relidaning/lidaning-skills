@@ -1,0 +1,27 @@
+# Runtime defaults. Environment variables with these names override values.
+# RAG_CONFIG_FILE selects an optional partial TOML override; relative paths in this
+# file resolve from this directory, never from the caller's working directory.
+# Deployment/build choices: docker-compose.yml and .env.example.
+# Technology contracts and migration notes: configuration.md.
+[runtime]
+RAG_HOST = "0.0.0.0"
+RAG_PORT = 8081
+RAG_MCP_URL = "http://127.0.0.1:8081" # unattended client; keep aligned with port
+CHROMA_HOST = "localhost"
+CHROMA_PORT = 8000
+VAULT_MCP_URL = "http://127.0.0.1:27125/mcp"
+VAULT_MCP_TIMEOUT = 30.0
+WATCH_INTERVAL = 60
+RAG_LOG_DIR = "logs"
+LLM_BASE_URL = "" # empty uses the OpenAI SDK default
+LLM_MODEL = "gpt-4o-mini"
+# LLM_API_KEY is environment-only; retrieval works without it.
+EMBED_MODEL_DIR = "/models/multilingual-e5-small" # container path
+EMBED_MODEL_ID = "multilingual-e5-small-int8"
+EMBED_MODEL_FILE = "model_quantized.onnx"
+EMBED_THREADS = 8
+EMBED_BATCH = 4
+EMBED_MAX_TOKENS = 512
+CHUNK_TOKENS = 300 # complete context header included; <= EMBED_MAX_TOKENS
+RRF_K = 60
+EXACT_KEYWORD_WEIGHT = 2.0

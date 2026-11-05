@@ -3,7 +3,7 @@ import contextvars
 import functools
 import inspect
 import json
-import os
+from rag_config import CONFIG
 import threading
 import time
 import uuid
@@ -11,7 +11,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-LOG_DIR = Path(os.getenv("RAG_LOG_DIR", str(Path(__file__).resolve().parent.parent / "logs")))
+LOG_DIR = Path(CONFIG["RAG_LOG_DIR"])
 _lock = threading.Lock()
 _call_id = contextvars.ContextVar("rag_call_id", default=None)
 TOOLS = {}

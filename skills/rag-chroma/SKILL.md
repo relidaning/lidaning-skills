@@ -26,6 +26,18 @@ Invoke this skill when:
 - **ChromaDB** (Docker, port 8000) — vector database
 - **rag-mcp** (Docker, port 8081) — FastMCP HTTP server, multilingual-e5-small ONNX embeddings (Chinese and English), hybrid vector + BM25 search
 
+## Portable configuration
+
+Edit [`config.toml`](config.toml) for runtime defaults. It drives the server,
+embedding engine, vault connector, logging and unattended client. Environment
+variables override the file; `RAG_CONFIG_FILE` selects a partial override.
+Copy `.env.example` to a private `.env` beside Compose for deployment overrides
+and `LLM_API_KEY`. See [configuration.md](configuration.md) for precedence,
+technology choices, supported replacements, endpoint updates and migration risks.
+These changes require a service recreation to take effect; model/dependency
+build changes also require a rebuild. Changing embedding identity can replace
+collections, so back up before deploying that change.
+
 ## Prerequisites
 
 ```bash
@@ -37,7 +49,7 @@ The vault is read through obsidian-local's `obsidian-vault-mcp` server
 index holds exactly the notes that server exposes. That container must be
 running (`obsidian-local/scripts/vault-mcp.sh ensure`); while it's down the
 index stays as it was, and `rag_status.vault_sync.last_error` says why. No
-Obsidian app, REST API or token is needed. `rag_answer` additionally requires `LLM_API_KEY` set in `docker-compose.yml`'s environment
+Obsidian app, REST API or token is needed. `rag_answer` additionally requires `LLM_API_KEY` set privately in `.env` or the deployment environment
 (it raises at call time if unset) — `LLM_BASE_URL` (default: OpenAI) and `LLM_MODEL`
 (default `gpt-4o-mini`) are optional overrides for a non-OpenAI-compatible backend.
 
@@ -86,7 +98,7 @@ it is never taken to mean the notes were deleted.
 Change detection uses MD5 content hashing. Signatures are stored in ChromaDB
 metadata so state survives container restarts without a full re-index.
 
-To change the interval: set `WATCH_INTERVAL=<seconds>` in `docker-compose.yml`.
+To change the interval: edit `WATCH_INTERVAL` in `config.toml` or override it in `.env`.
 
 ## Chunking and search
 

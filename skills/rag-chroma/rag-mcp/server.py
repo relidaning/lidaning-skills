@@ -41,6 +41,7 @@ from fastmcp import FastMCP
 from openai import AsyncOpenAI
 from starlette.responses import PlainTextResponse
 
+from rag_config import CONFIG
 from bm25 import BM25
 from chunker import VERSION, chunk_note
 from audit import audited, event, read_events
@@ -52,13 +53,13 @@ from vault_client import URL as VAULT_MCP_URL, VaultClient
 # Config
 # ---------------------------------------------------------------------------
 
-CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
-CHROMA_PORT = os.getenv("CHROMA_PORT", "8000")
+CHROMA_HOST = CONFIG["CHROMA_HOST"]
+CHROMA_PORT = CONFIG["CHROMA_PORT"]
 
-WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL", "60"))
+WATCH_INTERVAL = CONFIG["WATCH_INTERVAL"]
 
 COLLECTION_NAME = "documents"  # the vault index; other collections are opt-in
-CHUNK_TOKENS = 300          # per chunk, header included; e5 reads up to 512
+CHUNK_TOKENS = CONFIG["CHUNK_TOKENS"]          # per chunk, header included; e5 reads up to 512
 CHUNK_OVERLAP_TOKENS = 0
 # Stored in each collection's metadata. A collection built by another model
 # (or, for the vault index, another chunker) is rebuilt at startup: vectors
@@ -66,16 +67,16 @@ CHUNK_OVERLAP_TOKENS = 0
 # 384-dim, so Chroma would not notice.
 CHUNKER_VERSION = VERSION
 _index_lock = threading.RLock()
-RRF_K = 60  # reciprocal rank fusion constant (the usual default)
+RRF_K = CONFIG["RRF_K"]  # reciprocal rank fusion constant (the usual default)
 # A short query with digits/symbols ("2203.15556", "rag_mcp.py") is a lookup
 # of an exact string; embeddings rank such queries near-randomly, so BM25
 # gets this much more weight in the fusion.
 EXACT_QUERY = re.compile(r"[\d_.\-/]")
-EXACT_KEYWORD_WEIGHT = 2.0
+EXACT_KEYWORD_WEIGHT = CONFIG["EXACT_KEYWORD_WEIGHT"]
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")   # empty = OpenAI default
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_BASE_URL = CONFIG["LLM_BASE_URL"]   # empty = OpenAI default
+LLM_MODEL = CONFIG["LLM_MODEL"]
 
 _llm: Optional[AsyncOpenAI] = None
 
@@ -655,4 +656,4 @@ register_web(mcp)
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8081)
+    mcp.run(transport="http", host=CONFIG["RAG_HOST"], port=CONFIG["RAG_PORT"])

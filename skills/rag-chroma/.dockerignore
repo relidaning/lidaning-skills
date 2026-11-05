@@ -1,0 +1,5 @@
+*
+!config.toml
+!rag-mcp/
+!rag-mcp/**
+rag-mcp/__pycache__/

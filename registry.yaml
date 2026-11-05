@@ -1,4 +1,6 @@
 skills:
+  - name: project-rules
+    path: skills/project-rules
   - name: english-practice
     path: skills/english-practice
   - name: memory-orchestrate

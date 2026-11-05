@@ -9,12 +9,15 @@ Base URL: $RAG_MCP_URL, default http://127.0.0.1:8081. Localhost traffic
 bypasses http_proxy. Raises RagError when the server is down or a tool fails.
 """
 import json
-import os
+from pathlib import Path
 import sys
 import urllib.error
 import urllib.request
 
-BASE = (os.environ.get("RAG_MCP_URL") or "http://127.0.0.1:8081").rstrip("/")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rag-mcp"))
+from rag_config import CONFIG
+
+BASE = CONFIG["RAG_MCP_URL"].rstrip("/")
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _HEADERS = {
     "Content-Type": "application/json",
