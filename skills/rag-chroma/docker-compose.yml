@@ -29,12 +29,15 @@ services:
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_MODEL=${LLM_MODEL}
+      - RAG_LOG_DIR=/skill/logs
       - TZ=Asia/Shanghai
       - EMBED_THREADS=8
       # glibc: fewer malloc arenas and eager trimming, so memory freed after a
       # re-index goes back to the OS instead of staying resident
       - MALLOC_ARENA_MAX=2
       - MALLOC_TRIM_THRESHOLD_=0
+    volumes:
+      - ./logs:/skill/logs
     depends_on:
       chromadb:
         condition: service_healthy

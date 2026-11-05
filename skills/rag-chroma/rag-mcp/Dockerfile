@@ -18,7 +18,8 @@ RUN mkdir -p /models/multilingual-e5-small && cd /models/multilingual-e5-small &
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py chunker.py bm25.py embedder.py vault_client.py ./
+COPY server.py chunker.py bm25.py embedder.py vault_client.py audit.py web.py ./
+COPY static ./static
 
 EXPOSE 8081
 

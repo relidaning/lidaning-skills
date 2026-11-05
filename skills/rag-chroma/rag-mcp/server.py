@@ -21,6 +21,7 @@ import time
 import logging
 import os
 import re
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -41,7 +42,9 @@ from openai import AsyncOpenAI
 from starlette.responses import PlainTextResponse
 
 from bm25 import BM25
-from chunker import chunk_note
+from chunker import VERSION, chunk_note
+from audit import audited, event, read_events
+from web import register_web
 from embedder import MODEL_ID, E5Embedder
 from vault_client import URL as VAULT_MCP_URL, VaultClient
 
@@ -56,12 +59,13 @@ WATCH_INTERVAL = int(os.getenv("WATCH_INTERVAL", "60"))
 
 COLLECTION_NAME = "documents"  # the vault index; other collections are opt-in
 CHUNK_TOKENS = 300          # per chunk, header included; e5 reads up to 512
-CHUNK_OVERLAP_TOKENS = 50
+CHUNK_OVERLAP_TOKENS = 0
 # Stored in each collection's metadata. A collection built by another model
 # (or, for the vault index, another chunker) is rebuilt at startup: vectors
 # from two models must never share a collection, and MiniLM and e5 are both
 # 384-dim, so Chroma would not notice.
-CHUNKER_VERSION = "md-headings-v2"
+CHUNKER_VERSION = VERSION
+_index_lock = threading.RLock()
 RRF_K = 60  # reciprocal rank fusion constant (the usual default)
 # A short query with digits/symbols ("2203.15556", "rag_mcp.py") is a lookup
 # of an exact string; embeddings rank such queries near-randomly, so BM25
@@ -160,15 +164,16 @@ def get_collection(name: str = COLLECTION_NAME):
 
 
 def _migrate_collections():
-    """Rebuild collections made by another embedding model or chunker. The
-    vault index is recreated empty (the watcher re-chunks every note); any
+    """Rebuild collections made by another embedding model. Chunker changes
+    are applied per note on edits/explicit loads, preserving unrelated notes.
+    For embedding changes, the vault index is recreated; any
     other collection is re-embedded from its stored text and metadata."""
     client = get_chroma()
     for name in map(str, client.list_collections()):
         col = client.get_collection(name)
         want = _collection_meta(name)
         have = col.metadata or {}
-        if all(have.get(k) == v for k, v in want.items() if k != "hnsw:space"):
+        if have.get("embed") == MODEL_ID:
             continue
         _log.warning("rebuilding collection %s (%s -> %s)", name,
                      {k: have.get(k) for k in want}, want)
@@ -202,17 +207,23 @@ def _sig(note: dict) -> str:
 def _index_note(collection, path: str, note: dict, sig: str) -> int:
     """Replace a note's chunks in the index; returns the chunk count.
     `note` is {"content", "frontmatter"} as the vault server returns it."""
-    existing = collection.get(where={"source": path}, limit=10000)
-    if existing["ids"]:
-        collection.delete(ids=existing["ids"])
     title = note["frontmatter"].get("title") or ""
     chunks = _chunk(note["content"], path, str(title))
     ids = [f"{path}::{i}" for i in range(len(chunks))]
     metadatas = [
-        {"source": path, "chunk": i, "heading": c["heading"], **({"sig": sig} if i == 0 else {})}
+        {"source": path, "chunk": i, "heading": c["heading"], "chunker": VERSION,
+         "tokens": _embedder.count_tokens(c["text"]), "split_reason": c["split_reason"],
+         **({"sig": sig} if i == 0 else {})}
         for i, c in enumerate(chunks)
     ]
-    collection.upsert(ids=ids, documents=[c["text"] for c in chunks], metadatas=metadatas)
+    # Embed/upsert first: a failed embedding must not erase the old note.
+    with _index_lock:
+        existing = collection.get(where={"source": path}, include=[], limit=100000)
+        collection.upsert(ids=ids, documents=[c["text"] for c in chunks], metadatas=metadatas)
+        stale = list(set(existing["ids"]) - set(ids))
+        if stale:
+            collection.delete(ids=stale)
+    event("note_indexed", source=path, chunks=len(chunks), chunker=VERSION)
     _bm25.pop(collection.name, None)
     _vault_state[path] = sig
     return len(chunks)
@@ -276,10 +287,11 @@ def _sync_vault():
         for path, note in notes.items():
             try:
                 sig = _sig(note)
-                _vault_mtime[path] = mtimes.get(path)
                 if _vault_state.get(path) == sig:
+                    _vault_mtime[path] = mtimes.get(path)
                     continue  # touched, content unchanged
                 n = _index_note(collection, path, note, sig)
+                _vault_mtime[path] = mtimes.get(path)
                 _log.info("re-indexed: %s (%d chunks)", path, n)
             except Exception as e:
                 _log.warning("index failed: %s: %s", path, e)
@@ -352,6 +364,7 @@ def _search(name: str, query: str, k: int, mode: str = "hybrid") -> list[dict]:
 
 
 @mcp.tool()
+@audited
 async def rag_search(query: str, k: int = 5, collection: str = COLLECTION_NAME,
                      mode: str = "hybrid") -> dict:
     """Semantic + keyword search over stored documents.
@@ -367,14 +380,16 @@ async def rag_search(query: str, k: int = 5, collection: str = COLLECTION_NAME,
     Returns dict with 'results': list of {id, metadata, score, snippet, match};
     score is cosine similarity, match says which ranker found the hit.
     """
+    _validate_query(query, k)
     hits = await asyncio.to_thread(_search, collection, query, k, mode)
     return {"results": [
         {"id": h["id"], "metadata": h["metadata"], "score": h["score"],
-         "snippet": h["text"][:300], "match": h["match"]} for h in hits
+         "snippet": h["text"][:300], "text": h["text"], "match": h["match"]} for h in hits
     ], "count": len(hits)}
 
 
 @mcp.tool()
+@audited
 async def rag_ingest(documents: list[dict], collection: str = COLLECTION_NAME) -> dict:
     """Embed and store documents in ChromaDB.
 
@@ -413,6 +428,7 @@ async def rag_ingest(documents: list[dict], collection: str = COLLECTION_NAME) -
 
 
 @mcp.tool()
+@audited
 async def rag_status() -> dict:
     """Show index statistics: model, doc count per collection, watcher state."""
     counts = {}
@@ -423,9 +439,10 @@ async def rag_status() -> dict:
         counts["error"] = str(e)
 
     return {
+        "answer_available": bool(LLM_API_KEY),
         "model": f"{MODEL_ID} (ONNX)",
         "search": "hybrid: vector + BM25, reciprocal rank fusion",
-        "chunking": f"{CHUNKER_VERSION}, <= {CHUNK_TOKENS} tokens",
+        "chunking": f"{CHUNKER_VERSION}, <= {CHUNK_TOKENS} tokens for new/reloaded notes",
         "collection": COLLECTION_NAME,
         "docs": counts.get(COLLECTION_NAME, 0),
         "collections": counts,
@@ -437,6 +454,7 @@ async def rag_status() -> dict:
 
 
 @mcp.tool()
+@audited
 async def rag_list(collection: str, limit: int = 1000) -> dict:
     """List a collection's entries (id + metadata, no content), e.g. every
     paper in "papers". Not meant for the vault index, which is large.
@@ -449,6 +467,7 @@ async def rag_list(collection: str, limit: int = 1000) -> dict:
 
 
 @mcp.tool()
+@audited
 async def rag_remove(doc_id: str, collection: str = COLLECTION_NAME) -> dict:
     """Remove a document from the index by its ID."""
     collection = get_collection(collection)
@@ -461,20 +480,29 @@ async def rag_remove(doc_id: str, collection: str = COLLECTION_NAME) -> dict:
 
 
 @mcp.tool()
-async def rag_load(doc_id: Optional[str] = None) -> dict:
+@audited
+async def rag_load(doc_id: Optional[str] = None, prefix: Optional[str] = None) -> dict:
     """Load notes from the Obsidian vault into the vector index.
 
     Args:
         doc_id: Vault-relative path of a specific note to load (e.g. "folder/note.md").
                 If omitted, all markdown notes in the vault are loaded recursively.
+        prefix: Optional vault directory; load only notes below this directory.
 
     Returns dict with 'ingested': chunk count and 'files': list of processed notes.
     """
-    return await asyncio.to_thread(_load, doc_id)
+    if doc_id and prefix:
+        raise ValueError("Choose doc_id or prefix, not both")
+    return await asyncio.to_thread(_load, doc_id, prefix)
 
 
-def _load(doc_id: Optional[str]) -> dict:
+def _load(doc_id: Optional[str], prefix: Optional[str] = None) -> dict:
     paths = [doc_id] if doc_id is not None else _vault.list_notes()
+    if prefix is not None:
+        prefix = prefix.strip("/")
+        paths = [p for p in paths if p.startswith(prefix + "/")]
+        if not paths:
+            raise ValueError(f"No vault notes in directory {prefix!r}")
     collection = get_collection()
     total_chunks = 0
     processed = []
@@ -501,6 +529,7 @@ def _load(doc_id: Optional[str]) -> dict:
 
 
 @mcp.tool()
+@audited
 async def rag_clear() -> dict:
     """Delete all indexed documents. Irreversible."""
     client = get_chroma()
@@ -513,6 +542,7 @@ async def rag_clear() -> dict:
 
 
 @mcp.tool()
+@audited
 async def rag_answer(query: str, k: int = 4) -> dict:
     """Retrieve relevant chunks and generate a grounded answer with citations.
 
@@ -525,7 +555,9 @@ async def rag_answer(query: str, k: int = 4) -> dict:
         - sources: Deduplicated list of source document names used.
         - chunks: The retrieved context passages with scores.
     """
+    _validate_query(query, k)
     hits = await asyncio.to_thread(_search, COLLECTION_NAME, query, k)
+    event("retrieval", query=query, retrieved=[{k: h[k] for k in ("id", "metadata", "score", "match")} for h in hits])
 
     if not hits:
         return {"answer": "No relevant documents found in the index.", "sources": [], "chunks": []}
@@ -555,8 +587,68 @@ async def rag_answer(query: str, k: int = 4) -> dict:
     # Extract unique source names from chunks actually used
     sources = list(dict.fromkeys(c["source"] for c in chunks_info))
 
-    return {"answer": answer, "sources": sources, "chunks": chunks_info}
+    return {"answer": answer, "sources": sources, "chunks": [{**c, "text": h["text"]} for c, h in zip(chunks_info, hits)]}
 
+
+
+def _validate_query(query, k):
+    if not query.strip() or len(query) > 8000:
+        raise ValueError("Query must contain 1–8000 characters")
+    if not 1 <= k <= 100:
+        raise ValueError("k must be between 1 and 100")
+
+
+def _sources(collection, prefix=""):
+    col = get_collection(collection)
+    sources = {}
+    offset = 0
+    while True:
+        got = col.get(include=["metadatas"], limit=1000, offset=offset)
+        for meta in got["metadatas"]:
+            source = (meta or {}).get("source", "")
+            if source and source.startswith(prefix):
+                sources[source] = sources.get(source, 0) + 1
+        if len(got["ids"]) < 1000:
+            break
+        offset += 1000
+    return [{"source": s, "chunks": n} for s, n in sorted(sources.items())]
+
+
+@mcp.tool()
+@audited
+async def rag_sources(collection: str = COLLECTION_NAME, prefix: str = "") -> dict:
+    """List indexed source paths and chunk counts; optionally filter by prefix."""
+    return {"sources": await asyncio.to_thread(_sources, collection, prefix)}
+
+
+@mcp.tool()
+@audited
+async def rag_chunks(collection: str = COLLECTION_NAME, source: str = "",
+                     offset: int = 0, limit: int = 30, doc_id: str = "") -> dict:
+    """Browse complete stored chunks and their metadata with pagination."""
+    if not 0 <= offset or not 1 <= limit <= 100:
+        raise ValueError("offset must be nonnegative; limit must be 1–100")
+    col = get_collection(collection)
+    kwargs = {"include": ["documents", "metadatas"], "offset": offset, "limit": limit}
+    if source:
+        kwargs["where"] = {"source": source}
+    if doc_id:
+        kwargs["ids"] = [doc_id]
+    got = await asyncio.to_thread(col.get, **kwargs)
+    items = [{"id": i, "metadata": m or {}, "text": d}
+             for i, m, d in zip(got["ids"], got["metadatas"], got["documents"])]
+    items.sort(key=lambda i: (i["metadata"].get("source", ""), i["metadata"].get("chunk", 0)))
+    return {"items": items, "count": len(items), "offset": offset, "has_more": len(items) == limit}
+
+
+@mcp.tool()
+@audited
+async def rag_logs(date: str = "", limit: int = 100) -> dict:
+    """Read recent daily audit events (YYYY-MM-DD, newest first)."""
+    return await asyncio.to_thread(read_events, date, limit)
+
+
+register_web(mcp)
 
 # ---------------------------------------------------------------------------
 # Entrypoint

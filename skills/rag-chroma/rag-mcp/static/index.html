@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>RAG Observatory</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/">RAG Observatory</a><span id="health" role="status">Connecting to the index…</span><button id="refresh">Refresh</button></header>
+<main>
+<section class="intro"><h1>Follow a question back to its source.</h1><p>Explore your vault’s chunks, test retrieval, and inspect what each tool did.</p></section>
+<nav aria-label="Views"><button class="active" data-view="search">Search</button><button data-view="browse">Chunks</button><button data-view="tools">Tools</button><button data-view="logs">Activity</button></nav>
+<div id="notice" role="status" hidden></div>
+<section id="search" class="view">
+<form id="search-form"><label class="query-label" for="query">Search your knowledge</label><div class="query-row"><input id="query" placeholder="Ask a question or look up an exact phrase…" required maxlength="8000"><button type="submit">Retrieve chunks</button></div><div class="options"><label>Collection<select id="search-collection" class="collections"></select></label><label>Ranking<select id="mode"><option value="hybrid">Hybrid</option><option value="vector">Meaning</option><option value="keyword">Keywords</option></select></label><label>Results<input id="k" type="number" min="1" max="100" value="5"></label><button type="button" id="answer">Generate answer</button></div></form>
+<div id="answer-result" hidden></div><div class="result-heading"><h2>Retrieved passages</h2><span id="result-count"></span></div><div id="results" class="passages"><p class="empty">Run a search to see full passages, their heading context, and retrieval scores.</p></div>
+</section>
+<section id="browse" class="view" hidden><div class="browser"><aside><h2>Indexed notes</h2><label>Collection<select id="browse-collection" class="collections"></select></label><label>Filter paths<input id="source-filter" placeholder="0_dev/0_AI/"></label><button id="sources-refresh">Find notes</button><p id="source-count"></p><div id="sources" class="source-list"></div></aside><div class="chunk-pane"><h2 id="selected-source">All chunks</h2><p>Full stored content with its heading hierarchy and split reason.</p><div id="chunks" class="passages"></div><div class="pager"><button id="previous">Previous</button><span id="page"></span><button id="next">Next</button></div></div></div></section>
+<section id="tools" class="view" hidden><h2>Run a RAG tool</h2><p>These controls use the same tools as your agent. Index changes affect the live collection.</p><div class="tool-layout"><form id="tool-form"><label>Tool<select id="tool"></select></label><p id="tool-description"></p><label>Arguments (JSON)<textarea id="arguments" rows="10" spellcheck="false">{}</textarea></label><button type="submit">Run tool</button></form><div><h3>Result</h3><pre id="tool-result">Choose a tool to begin.</pre></div></div></section>
+<section id="logs" class="view" hidden><div class="activity-heading"><div><h2>Tool activity</h2><p>Calls, queries, retrieved chunk IDs, timing, and indexing events.</p></div><label>Date<input id="log-date" type="date"></label><button id="logs-refresh">Load activity</button></div><p id="log-file"></p><div id="events"></div></section>
+</main><footer>Live vault index <span id="sync"></span></footer>
+</body></html>

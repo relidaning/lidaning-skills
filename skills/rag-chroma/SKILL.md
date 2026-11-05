@@ -45,7 +45,7 @@ Obsidian app, REST API or token is needed. `rag_answer` additionally requires `L
 
 | Tool | Purpose |
 |---|---|
-| `rag_load(doc_id?)` | Load vault notes into the index. No arg = all notes recursively; pass a vault-relative path for one note. |
+| `rag_load(doc_id?, prefix?)` | Load vault notes. No args = all notes; `doc_id` = one note; `prefix` = one directory recursively (e.g. `0_dev/0_AI`). |
 | `rag_search(query, k, collection?, mode?)` | Hybrid search — returns `[{id, metadata, score, snippet, match}]`. `mode`: `hybrid` (default), `vector` (meaning only) or `keyword` (BM25 only: file names, IDs, rare terms). `score` is always cosine similarity; `match` says which ranker found the hit. |
 | `rag_answer(query, k=4)` | Retrieve top-k chunks and generate a grounded, cited answer via an LLM — returns `{answer, sources, chunks}`. Use this instead of `rag_search` when the user wants a synthesized answer, not raw snippets. Requires `LLM_API_KEY` (see Prerequisites). |
 | `rag_ingest(documents, collection?)` | Embed and store arbitrary text — accepts `[{id, content, metadata}]` |
@@ -53,6 +53,9 @@ Obsidian app, REST API or token is needed. `rag_answer` additionally requires `L
 | `rag_status()` | Doc count per collection, tracked files, watch interval |
 | `rag_remove(doc_id, collection?)` | Remove a single chunk by ID |
 | `rag_clear()` | Wipe the vault index (irreversible) |
+| `rag_sources(collection?, prefix?)` | List indexed source paths and chunk counts. |
+| `rag_chunks(collection?, source?, offset?, limit?, doc_id?)` | Browse complete chunk text and metadata; pages up to 100 chunks. |
+| `rag_logs(date?, limit?)` | Read daily audit events, newest first; date is `YYYY-MM-DD`. |
 
 `collection` defaults to `documents`, the vault index. Other collections hold
 data that isn't vault notes and are never touched by the watcher:
@@ -87,25 +90,71 @@ To change the interval: set `WATCH_INTERVAL=<seconds>` in `docker-compose.yml`.
 
 ## Chunking and search
 
-- **Chunks** (`rag-mcp/chunker.py`): a note is cut at its headings, then at
-  paragraphs (a fenced code block stays whole); only an oversized block is split
-  further, by line, sentence, then token count. Each chunk is at most 300
-  tokens of the embedding model, so nothing is truncated (e5 reads 512).
-  Frontmatter is dropped, and each chunk starts with a header, `note/path >
-  Heading > Subheading`, so it carries its context; the heading path is also in
-  the `heading` metadata.
+- **Chunks** (`rag-mcp/chunker.py`, `md-structure-v3`): parse ATX and Setext
+  headings into a tree, ignoring headings inside fenced code. Keep an entire
+  section with its subsections when it fits; otherwise recurse into lower-level
+  headings, then paragraphs, then sentences. Only an indivisible oversized
+  sentence/block uses token-bounded splitting. Unrelated top-level sections are
+  never merged and there is no text overlap. Frontmatter is dropped; each chunk
+  carries its full heading ancestry in its context header. The complete stored
+  text, including the header, stays within 300 embedding tokens. Metadata stores
+  `heading`, `tokens`, `split_reason`, and `chunker`. An ancestry header too large
+  to fit produces an explicit indexing error rather than silent truncation.
 - **Search**: the vector ranking (e5 cosine) and a BM25 keyword ranking
   (`rag-mcp/bm25.py`; Chinese indexed as character unigrams + bigrams) are
   merged by reciprocal rank fusion. The BM25 index is in memory, rebuilt from
   Chroma on the first search after a write.
-- **Model changes rebuild**: each collection's metadata records its `embed`
-  model (and, for `documents`, its `chunker` version). At startup a mismatch
-  rebuilds it: `documents` is recreated empty and re-indexed by the watcher
-  (~10 min for the whole vault, search results partial meanwhile); other
-  collections are re-embedded from their stored text.
+- **Version changes**: an embedding model mismatch rebuilds collections to
+  avoid mixing incompatible vectors. A chunker change preserves the index;
+  new/edited notes use the new chunker, and `rag_load(prefix="folder")` explicitly
+  rebuilds a directory. Older unchanged notes keep their chunks until loaded.
+  Replacement upserts new chunks before removing stale IDs so embedding failures
+  preserve the old note. Other collections (such as `papers`) are unaffected by
+  vault chunker updates.
 - Similarity scores from e5 are compressed (unrelated text still scores
   ~0.7–0.8), so compare scores against each other, not against thresholds
   carried over from the old MiniLM model.
+
+## Web inspector and logs
+
+Open **http://localhost:8081/** (or the machine's LAN address on port 8081).
+The inspector is part of the existing RAG service, with no separate frontend
+build or hosted account. Search shows complete passages and ranking scores;
+Chunks filters indexed source paths and pages through stored text, heading
+hierarchy, token counts and split reasons. Tools exposes every MCP tool with
+editable JSON arguments. Activity reads the daily audit trail. Generated answers
+require the service's LLM configuration; retrieval and browsing do not.
+
+The HTTP tool endpoint shares the audited MCP implementations. It rejects
+cross-origin/form submissions and requires an explicit confirmation for index
+removal/clearing. This is a trusted local/LAN inspector with the same access as
+the existing MCP service; it does not add authentication or public hosting.
+
+Logs persist at **`skills/rag-chroma/logs/YYYY-MM-DD.log`**, mounted as
+`/skill/logs` in Docker (`RAG_LOG_DIR` overrides the directory). Each line is JSON:
+local timestamp with timezone, event, call ID, tool name, arguments including
+query/keywords and ranking mode, duration, result/error, and retrieved chunk
+IDs, sources, headings and scores. Answer retrieval is also logged before the
+LLM call, so failed answer generation still leaves retrieval evidence.
+Indexing events record source path, chunk count and chunker version. Ingest logs
+IDs rather than copying document bodies. Logs contain private queries/source
+paths and are gitignored; there is no automatic retention/deletion policy.
+
+After source changes, rebuild/restart just this service:
+
+```bash
+docker compose -f skills/rag-chroma/docker-compose.yml build rag-mcp
+docker compose -f skills/rag-chroma/docker-compose.yml up -d --no-deps rag-mcp
+```
+
+Offline tests use fake vault/index data and temporary logs. With the service
+image built, run them without connecting to the live vault:
+
+```bash
+docker compose -f skills/rag-chroma/docker-compose.yml run --rm --no-deps \
+  -v "$PWD/skills/rag-chroma/tests:/app/tests:ro" \
+  rag-mcp python -m unittest discover -s tests -v
+```
 
 ## Architecture
 
@@ -117,5 +166,7 @@ docker compose up
        ├── BM25 keyword index      (in memory, per collection)
        ├── ChromaDB HttpClient     (store/query)
        ├── vault watcher          (polls obsidian-vault-mcp every 60s)
+       ├── GET / (web inspector), POST /api/call (shared tool functions)
+       ├── daily JSON audit logs (persistent host bind mount)
        └── GET /health            (Docker healthcheck; opens no MCP session)
 ```

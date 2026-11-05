@@ -1,214 +1,196 @@
-"""Markdown-aware chunking for vault notes.
+"""Section-first Markdown chunking with complete heading ancestry and no overlap.
 
-A note is cut at its headings first, then at blank-line blocks (a fenced code
-block counts as one block), and only an oversized block is broken further: by
-line, then by sentence, then hard by token count. Sizes are measured in the
-embedding model's tokens, so no chunk is silently truncated by the model.
-
-Every chunk starts with a context header, "<note path> > <heading> > ...", so a
-chunk from the middle of a note still says which note and section it is from.
-YAML frontmatter is dropped; its `title`, when it differs from the file name,
-goes into the header.
+Keep a section and its descendants together if it fits. Otherwise descend into
+subsections, then paragraphs, sentences, and only then indivisible long text.
+Token limits include the context header and are checked on the final text.
 """
-
 import re
+from dataclasses import dataclass, field
 from typing import Callable
 
+VERSION = "md-structure-v3"
 FRONTMATTER = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.S)
 FM_TITLE = re.compile(r"^title:[ \t]*(.+?)[ \t]*$", re.M)
-HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$")
-FENCE = re.compile(r"^[ \t]*(```|~~~)")
-# Heading numbering some Obsidian plugins insert, e.g. "⁠1.1.2. Title"
+HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 HEADING_NUMBER = re.compile(r"^[⁠​\s]*(?:\d+\.)+\d*\s+")
-# A sentence with its trailing whitespace, so pieces re-join with ""
-SENTENCE = re.compile(r".+?(?:[。！？!?；;]+|[.:](?=\s)|$)\s*", re.S)
+SENTENCE = re.compile(r".+?(?:[。！？!?；;]+|\.(?=\s)|$)\s*", re.S)
 
 
-def _clean_heading(text: str) -> str:
-    text = HEADING_NUMBER.sub("", text)
-    return text.replace("⁠", "").replace("​", "").strip()
+@dataclass
+class Section:
+    level: int
+    path: tuple
+    heading: str = ""
+    lines: list = field(default_factory=list)
+    children: list = field(default_factory=list)
 
 
-def _split_frontmatter(text: str) -> tuple[str, str]:
-    """(frontmatter title or "", body without the frontmatter)."""
-    m = FRONTMATTER.match(text)
-    if not m:
-        return "", text
-    t = FM_TITLE.search(m.group(1))
-    return (t.group(1).strip("'\"") if t else ""), text[m.end():]
-
-
-def _units(body: str):
-    """Yield (kind, path, text): kind "heading" (text = the heading line) or
-    "block" (a paragraph, list, table or whole fenced code block)."""
-    path: list[tuple[int, str]] = []
-    block: list[str] = []
+def _tree(body):
+    root = Section(0, ())
+    stack = [root]
     fence = None
-
-    def flush():
-        text = "\n".join(block).strip("\n")
-        block.clear()
-        return text
-
-    for line in body.split("\n"):
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         f = FENCE.match(line)
         if fence:
-            block.append(line)
-            if f and f.group(1) == fence:
+            stack[-1].lines.append(line)
+            if f and f[1][0] == fence[0] and len(f[1]) >= fence[1] and not f[2].strip():
                 fence = None
+            i += 1
             continue
         if f:
-            fence = f.group(1)
-            block.append(line)
-            continue
-        h = HEADING.match(line)
-        if h:
-            if (text := flush()).strip():
-                yield "block", tuple(p for _, p in path), text
-            level = len(h.group(1))
-            path = [(lv, p) for lv, p in path if lv < level] + [(level, _clean_heading(h.group(2)))]
-            yield "heading", tuple(p for _, p in path), line
-        elif not line.strip():
-            if (text := flush()).strip():
-                yield "block", tuple(p for _, p in path), text
+            fence = (f[1][0], len(f[1]))
+        h = None if f else HEADING.match(line)
+        setext = (SETEXT.match(lines[i + 1]) if not f and line.strip()
+                  and i + 1 < len(lines) else None)
+        if h or setext:
+            level = len(h[1]) if h else (1 if setext[1][0] == "=" else 2)
+            title = h[2] if h else line.strip()
+            title = re.sub(r"\s+#+\s*$", "", title)
+            title = HEADING_NUMBER.sub("", title).replace("⁠", "").replace("​", "").strip()
+            while stack[-1].level >= level:
+                stack.pop()
+            section = Section(level, stack[-1].path + (title,), f"{'#' * level} {title}")
+            stack[-1].children.append(section)
+            stack.append(section)
+            i += 2 if setext and not h else 1
         else:
-            block.append(line)
-    if (text := flush()).strip():
-        yield "block", tuple(p for _, p in path), text
+            stack[-1].lines.append(line)
+            i += 1
+    return root
 
 
-def _hard_split(text: str, budget: int, ntok) -> list[str]:
-    """Cut text into pieces of at most `budget` tokens, by character halving."""
-    out, rest = [], text
-    while rest:
-        lo, hi = 1, len(rest)
-        while lo < hi:  # longest prefix within budget
-            mid = (lo + hi + 1) // 2
-            if ntok(rest[:mid]) <= budget:
-                lo = mid
-            else:
-                hi = mid - 1
-        out.append(rest[:lo])
-        rest = rest[lo:]
-    return out
+def _blocks(text):
+    """Paragraphs, retaining blank lines within fenced blocks."""
+    blocks, cur, fence = [], [], None
+    for line in text.splitlines(keepends=True):
+        f = FENCE.match(line.rstrip("\n"))
+        if fence:
+            cur.append(line)
+            if f and f[1][0] == fence[0] and len(f[1]) >= fence[1] and not f[2].strip():
+                fence = None
+        elif f:
+            fence = (f[1][0], len(f[1]))
+            cur.append(line)
+        elif not line.strip():
+            if cur:
+                blocks.append("".join(cur).strip("\n"))
+                cur = []
+        else:
+            cur.append(line)
+    if cur:
+        blocks.append("".join(cur).strip("\n"))
+    return blocks
 
 
-def _pieces(block: str, budget: int, ntok) -> list[tuple[str, str]]:
-    """(joiner, text) pieces of a block, each within budget. The joiner is what
-    goes between this piece and the previous one when they share a chunk."""
-    if ntok(block) <= budget:
-        return [("\n\n", block)]
-    out = []
-    for i, line in enumerate(block.split("\n")):
-        joiner = "\n\n" if i == 0 else "\n"
-        if ntok(line) <= budget:
-            out.append((joiner, line))
-            continue
-        for j, sent in enumerate(SENTENCE.findall(line)):
-            for k, part in enumerate(_hard_split(sent, budget, ntok)):
-                out.append((joiner if j == k == 0 else "", part))
-    return out
+def chunk_note(text: str, path: str, ntok: Callable[[str], int], max_tokens=300,
+               overlap_tokens=0, min_tokens=0, title="") -> list[dict]:
+    """Return text, heading and split_reason per chunk.
 
-
-def _common(paths) -> tuple:
-    paths = list(paths)
-    out = paths[0]
-    for p in paths[1:]:
-        n = 0
-        while n < min(len(out), len(p)) and out[n] == p[n]:
-            n += 1
-        out = out[:n]
-    return out
-
-
-def chunk_note(
-    text: str,
-    path: str,
-    ntok: Callable[[str], int],
-    max_tokens: int = 300,
-    overlap_tokens: int = 50,
-    min_tokens: int = 80,
-    title: str = "",
-) -> list[dict]:
-    """Chunk one note. Returns [{"text", "heading"}], never empty.
-
-    Args:
-        text: The note's markdown.
-        path: Vault-relative path, used in the context header.
-        ntok: Token counter of the embedding model (no special tokens).
-        max_tokens: Upper bound per chunk, header included.
-        overlap_tokens: Trailing text of a chunk repeated at the start of the
-            next, only within one section and only in whole pieces.
-        min_tokens: A chunk smaller than this absorbs the next section instead
-            of ending at its heading, so runs of tiny sections don't become
-            near-empty chunks.
-        title: The note's title when the caller already split off the
-            frontmatter; otherwise it is read from the frontmatter in `text`.
+    overlap_tokens/min_tokens remain accepted for old callers; neither overlap
+    nor merging unrelated sections is applied. An ancestry header too large to
+    fit raises rather than silently dropping hierarchy or exceeding the limit.
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    fm_title, body = _split_frontmatter(text)
-    title = title or fm_title
+    fm = FRONTMATTER.match(text)
+    if fm:
+        found = FM_TITLE.search(fm[1])
+        title = title or (found[1].strip("'\"") if found else "")
+        text = text[fm.end():]
     name = path[:-3] if path.endswith(".md") else path
     stem = name.rsplit("/", 1)[-1]
     base = name if not title or title == stem else f"{name} ({title})"
+    out = []
 
-    def header(p: tuple) -> str:
-        if p and p[0] in (stem, title):  # "Git > Git": the H1 repeats the name
-            p = p[1:]
-        return " > ".join((base,) + p)
+    def render(p, body):
+        header = " > ".join((base,) + p)
+        return header + ("\n\n" + body.strip("\n") if body.strip("\n") else "")
 
-    chunks: list[dict] = []
-    # (path, joiner, text, tokens, is_heading)
-    cur: list[tuple[tuple, str, str, int, bool]] = []
+    def fits(p, body):
+        return ntok(render(p, body)) <= max_tokens
 
-    def size() -> int:
-        return sum(c[3] for c in cur)
+    def emit(p, body, reason):
+        result = render(p, body)
+        if ntok(result) > max_tokens:
+            raise ValueError(f"Heading hierarchy exceeds {max_tokens} tokens: {path}")
+        out.append({"text": result, "heading": " > ".join(p), "split_reason": reason})
 
-    def path_of(items) -> tuple:
-        blocks = [c[0] for c in items if not c[4]]
-        return _common(blocks or [c[0] for c in items])
+    def hard_parts(p, value):
+        # Only an indivisible sentence/block reaches this fallback.
+        while value:
+            lo, hi = 0, len(value)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if fits(p, value[:mid]):
+                    lo = mid
+                else:
+                    hi = mid - 1
+            if not lo:
+                raise ValueError(f"No content fits after heading hierarchy: {path}")
+            yield value[:lo]
+            value = value[lo:]
 
-    def budget(p: tuple) -> int:
-        return max(max_tokens - ntok(header(p)) - 2, 64)
+    def split_body(p, body):
+        current = ""
+        for block in _blocks(body):
+            candidate = current + ("\n\n" if current else "") + block
+            if fits(p, candidate):
+                current = candidate
+                continue
+            if current:
+                emit(p, current, "paragraph")
+                current = ""
+            if fits(p, block):
+                current = block
+                continue
+            sentence_chunk = ""
+            for sentence in SENTENCE.findall(block):
+                if fits(p, sentence_chunk + sentence):
+                    sentence_chunk += sentence
+                    continue
+                if sentence_chunk:
+                    emit(p, sentence_chunk, "sentence")
+                    sentence_chunk = ""
+                if fits(p, sentence):
+                    sentence_chunk = sentence
+                else:
+                    for part in hard_parts(p, sentence):
+                        emit(p, part, "token-limit")
+            if sentence_chunk:
+                emit(p, sentence_chunk, "sentence")
+        if current:
+            emit(p, current, "paragraph")
 
-    def flush(overlap_path=None):
-        nonlocal cur
-        if not any(not c[4] for c in cur):  # headings with no text under them
-            cur = []
+    def whole(node):
+        parts = ["\n".join(node.lines).strip("\n")]
+        for child in node.children:
+            parts.append(child.heading + "\n\n" + whole(child))
+        return "\n\n".join(p for p in parts if p)
+
+    def visit(node):
+        body = whole(node)
+        if fits(node.path, body):
+            emit(node.path, body, "section")
             return
-        p = path_of(cur)
-        items = list(cur)
-        while items and items[0][4] and len(items[0][0]) <= len(p):
-            items.pop(0)  # a leading heading the chunk header already names
-        while items and items[-1][4]:
-            items.pop()  # a trailing heading whose text went to the next chunk
-        body_text = "".join((c[1] if i else "") + c[2] for i, c in enumerate(items))
-        chunks.append({"text": header(p) + "\n\n" + body_text.strip("\n"), "heading": " > ".join(p)})
-        keep: list = []
-        if overlap_path is not None:
-            for item in reversed(cur):
-                if item[0] != overlap_path or sum(c[3] for c in keep) + item[3] > overlap_tokens:
-                    break
-                keep.insert(0, item)
-        cur = keep
+        own = "\n".join(node.lines).strip("\n")
+        if own.strip():
+            split_body(node.path, own)
+        for child in node.children:
+            visit(child)
 
-    for kind, p, text_ in _units(body):
-        if kind == "heading":
-            if cur and size() >= min_tokens:
-                flush()
-            # Kept inline; dropped at flush if it leads the chunk and the
-            # header names it, so it only shows when tiny sections merge.
-            cur.append((p, "\n\n", text_, ntok(text_), True))
-            continue
-        for joiner, piece in _pieces(text_, budget(p), ntok):
-            t = ntok(piece)
-            if any(not c[4] for c in cur) and size() + t > budget(path_of(cur + [(p, "", "", 0, False)])):
-                flush(overlap_path=p)
-                # an overlap that no longer leaves room for this piece is dropped
-                if cur and size() + t > budget(p):
-                    cur = []
-            cur.append((p, joiner, piece, t, False))
-    flush()
-    if not chunks:
-        chunks.append({"text": header(()), "heading": ""})
-    return chunks
+    root = _tree(text)
+    # The document root is not permission to merge unrelated top-level sections.
+    if (intro := "\n".join(root.lines).strip("\n")).strip():
+        if fits((), intro):
+            emit((), intro, "section")
+        else:
+            split_body((), intro)
+    for node in root.children:
+        visit(node)
+    if not out:
+        emit((), "", "section")
+    return out

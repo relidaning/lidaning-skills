@@ -9,3 +9,6 @@ skills/*/data/
 skills/**/chroma_data/
 skills/**/chroma.log
 .env
+
+# Runtime tool audits can contain private vault queries and source paths.
+skills/*/logs/
