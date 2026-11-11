@@ -1,4 +1,4 @@
 name: project-rules
-description: Portable project configuration and visible, replaceable technology choices for executable projects.
+description: Reorganize existing project files, centralize portable configuration, and document replaceable technology choices for executable projects.
 scope: global
-tags: [project, rules, configuration, portability, architecture]
+tags: [project, rules, organization, configuration, portability, architecture]
