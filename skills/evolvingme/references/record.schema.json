@@ -1,0 +1,377 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "enum": [
+        "decision",
+        "principle"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "revision_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "supersedes": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "uuid"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "project",
+        "domain",
+        "conditions"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "locator",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "id",
+    "revision_id",
+    "supersedes",
+    "created_at",
+    "scope",
+    "source",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvolvingMe revision v1",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "pending",
+                  "confirmed",
+                  "declined"
+                ]
+              },
+              "situation": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "constraints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "prediction": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "confidence": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ]
+                      },
+                      "evidence_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "confidence",
+                      "evidence_ids"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "choice": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "user_rationale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "agent_interpretation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "principle_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "status",
+              "situation",
+              "question",
+              "options",
+              "constraints",
+              "prediction",
+              "choice",
+              "user_rationale",
+              "agent_interpretation",
+              "principle_ids"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "pending"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "choice": {
+                      "type": "null"
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "choice": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "payload": {
+                  "properties": {
+                    "status": {
+                      "const": "confirmed"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "source": {
+                  "properties": {
+                    "kind": {
+                      "const": "user"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": {
+              "statement": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "tentative",
+                  "retired"
+                ]
+              },
+              "basis": {
+                "enum": [
+                  "explicit",
+                  "inferred"
+                ]
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "exceptions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "counterevidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sync": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "target": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "applied",
+                        "pending",
+                        "conflict",
+                        "failed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "summary",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "statement",
+              "status",
+              "basis",
+              "conditions",
+              "exceptions",
+              "evidence_ids",
+              "counterevidence_ids",
+              "sync"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ]
+}

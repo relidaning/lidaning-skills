@@ -7,6 +7,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 
 | Skill | Scope | Description |
 |---|---|---|
+| `evolvingme` | global | Records user decisions, recalls scoped preferences, adds 🧠 instincts to decision questions, and updates related skills. Local data stays ignored; runs when loaded by the agent. |
 | `guardails` | global | Requires explicit permission before accessing, using, changing, or sharing private information and credentials. Instruction-based; requires the agent to load the skill. |
 | `english-practice` | project | Always responds in English; corrects grammar, word choice, phrasing. |
 | `memory-orchestrate` | project | Project memory: session log, core concepts, user-stated memories. |

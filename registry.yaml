@@ -1,4 +1,6 @@
 skills:
+  - name: evolvingme
+    path: skills/evolvingme
   - name: guardails
     path: skills/guardails
   - name: project-rules
