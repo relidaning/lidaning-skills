@@ -6,6 +6,7 @@ node_modules/
 __pycache__/
 .venv/
 skills/*/data/
+/data/evolvingme/
 skills/**/chroma_data/
 skills/**/chroma.log
 .env

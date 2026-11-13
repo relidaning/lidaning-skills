@@ -1,27 +1,57 @@
 # Decision data contract (version 1)
 
-Runtime layout, all relative to the selected data root:
+Runtime layout, all relative to the selected data root (default
+`<app-root>/data/evolvingme/`, resolved as described in `../SKILL.md`):
 
 ```text
-decisions/<decision-id>/<revision-id>.json
-principles/<principle-id>/<revision-id>.json
+decisions/<domain>.jsonl
+principles/<domain>.jsonl
 domains/<topic-slug>/principles.md
 ```
 
-Use UUIDs for IDs and revision filenames, UTC ISO 8601 timestamps, UTF-8 JSON,
-and the schema beside this file. Create each revision as a new file with
-exclusive creation or a temporary file followed by an atomic move without
-overwriting an existing revision. Validate JSON and required fields before
-publishing it. Incomplete temporary files are not records. A revision's
+Use one domain file for related decisions, such as `coding.jsonl` or
+`layout.jsonl`. Reuse existing domain slugs instead of creating near-duplicates;
+the filename's domain must match `scope.domain`. Keep one primary domain per
+decision and retain project scope inside each record. Principles use the same
+domain organization in their separate directory. Indexes link IDs and files,
+not line numbers, which may change during recovery or deletion.
+
+Use UUIDs for IDs and revision IDs, UTC ISO 8601 timestamps, UTF-8 JSONL,
+and the schema beside this file for each line. Each revision is one complete
+JSON object on one line, followed by a newline; escape embedded newlines.
+Validate before appending. Create the domain file if absent, otherwise append
+without truncating existing records. Serialize writers using an exclusive
+per-domain lock covering read/check/append, including migrations and repairs;
+all writers must use the same lock (for example `<data-root>/.locks/<domain>.lock`
+with an OS advisory file lock). Flush and fsync before reporting success.
+Under the lock, check revision IDs: identical existing revisions are idempotent
+retries; a reused ID with different content is an error. Validate the predecessor
+and current head before appending a superseding revision.
+
+If the last line is incomplete or invalid after an interrupted write, stop
+appending and report the blocker; do not append onto a damaged tail or silently
+discard evidence. Readers may use valid earlier lines but must disclose partial
+coverage. Repair only within authorized scope. Explicit forget/delete requests
+are an exception to append-only storage: rewrite affected files atomically under
+the same lock, removing affected revisions and derived data without backups of
+forgotten content. A revision's
 `supersedes` is its predecessor revision ID, or null on creation. Do not change
 IDs when a pending decision is confirmed.
 
 Records form revision chains. The current revision is the sole unsuperseded
-head, not simply the last filename alphabetically. Multiple heads mean a
+head, not simply the last line or newest timestamp. Multiple heads mean a
 concurrent-update conflict: preserve both and resolve explicitly before
 export or synchronization. Indexes are rebuildable navigation, never evidence.
 Each domain notebook lists record IDs, a short scope, active principle IDs,
 and the owning skill or proposed skill purpose. Avoid copying raw records.
+
+To migrate legacy per-revision JSON files, validate each record and append it to
+the matching domain file under the same lock, preserving IDs, revisions,
+timestamps, provenance and supersedes links. Verify persisted records before
+removing their authorized legacy copies. Reclassification appends a superseding
+revision with the new domain; preserve its predecessor in the old domain and
+update the index to link both files. A layout-only migration leaves the per-line
+schema version at 1.
 
 Decision `payload` fields:
 
@@ -79,3 +109,14 @@ Behavior checks with synthetic conversations (do not store these as user data):
   no contradictory active rule is silently applied.
 - No owning skill: write the domain notebook, no surprise skill installation.
 - Storage/edit failure: disclose unsaved/pending changes; no success claim.
+- Unsolicited "I think it should be in app-root/data/evolvingme/": create a
+  confirmed scoped choice without a prior question; verify persistence and show
+  the recording receipt, without inferring a global storage rule.
+- "Organize decisions by domain and append to the existing file": record the
+  organization choice in the same turn as the implementation and show a receipt.
+- "Update EvolvingMe's trigger and show its format when it records": record
+  this explicit user choice once; internal bookkeeping creates no extra records.
+- "What is JSONL?": answer without creating a preference or recording receipt.
+- "Would JSONL or SQLite be better?": discussion only; no confirmed choice
+  until the user actually chooses. A recorded pending revision gets a pending
+  receipt, never a confirmed one.

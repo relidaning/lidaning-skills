@@ -1,10 +1,12 @@
 ---
 name: evolvingme
 description: >
-  Use when an agent asks the user for a decision, preference, clarification or
-  instructions, and when the user answers, corrects a choice or states a lasting
-  preference. Record decision context and confirmed choices, recall scoped
-  principles, suggest an EvolvingMe instinct, and update related skills.
+  Use before asking the user for a decision or clarification, and whenever the
+  user chooses, approves, rejects, corrects, or specifies an approach, convention,
+  storage layout, workflow, or preference, even without a prior question.
+  Includes "I think it should...", "use X instead", and requests to change skill
+  rules or triggers. Record scoped decisions and show a brain-framed receipt
+  after verified writes; recall principles and offer instincts before questions.
 ---
 
 # EvolvingMe
@@ -13,13 +15,46 @@ Learn how this user decides, preserving evidence for future decision-model
 training. Phase one advises; the user remains the decision maker. Do not ask
 extra questions just to collect data or replace the agent's actual task.
 
+## Activation and turn completion
+
+User-confirmed principle `2a67b2fb-c7d5-476b-84f7-273c51a35a8e`:
+capture unsolicited choices and visibly confirm saves so decisions are not
+lost while their implementation is completed.
+
+- A decision need not answer an agent question or state a permanent rule.
+  Unsolicited design choices, corrections and concrete change requests specifying
+  a chosen behavior count. For example, "it should be in app-root/data/..."
+  and "organize decisions by domain and append to the existing file" trigger
+  recording in the same turn, alongside implementing the requested change.
+- Do not treat every message as a decision: information-only questions, quoted
+  examples, agent proposals, and routine execution requests with no new choice
+  do not establish a preference. Tentative alternatives posed for discussion
+  remain unresolved; do not turn them into confirmed choices.
+- A concrete "I think it should..." instruction may express a current choice
+  without creating a universal principle. Preserve the actual scope and wording;
+  do not require the user to say "remember" or invoke this skill explicitly.
+- Before ending an applicable turn, verify that each expressed choice has a
+  validated, persisted revision and an updated domain index, or disclose the
+  specific unsaved work. Editing a skill or implementing a choice alone does
+  not record the decision. Explicit user requests about EvolvingMe itself count;
+  internal recording, index updates and receipts do not recursively create
+  further decisions.
+
 ## Storage and access
 
-Resolve paths relative to this skill's real source folder, including through
-installation symlinks. Use `data/` there by default; an explicitly selected
-absolute `EVOLVINGME_DATA_DIR` overrides it. Use the same root across agents;
-project scope is recorded inside records, not inferred from the caller's cwd.
-Create directories only when needed. Never commit runtime records.
+Use `<app-root>/data/evolvingme/` by default. Resolve installation symlinks
+first: when the real skill folder is `<app-root>/skills/evolvingme/`, app root
+is the parent of `skills/` (the distribution repository root), not the project
+the agent is currently working on. For this deployment the default is
+`/data/apps/lidaning-skills/data/evolvingme/`. For another installation layout,
+select an absolute `EVOLVINGME_DATA_DIR` explicitly rather than guessing a root.
+An explicitly selected absolute `EVOLVINGME_DATA_DIR` overrides the default;
+reject relative overrides. Use the same root across agents; project scope is
+recorded inside records, not inferred from the caller's cwd. Create directories
+only when needed. Never commit runtime records; ignore the selected data root.
+Existing records under the former `skills/evolvingme/data/` location require
+an explicit migration preserving IDs and revisions; changing the default does
+not move or merge them automatically.
 
 This request authorizes the decision-memory workflow when invoked, within the
 conversation and stated scope. Respect applicable private-data permissions:
@@ -31,6 +66,10 @@ Do not claim that local storage is encrypted or technically access controlled.
 
 Read [the record contract](references/records.md) before writing records. The
 machine contract is [record.schema.json](references/record.schema.json).
+Group decisions by domain in `decisions/<domain>.jsonl` (for example,
+`coding.jsonl` or `layout.jsonl`); append one validated revision per line to
+the existing domain file. Store principles in `principles/<domain>.jsonl`.
+Use the contract's locking and recovery rules; never overwrite earlier revisions.
 Use ordinary file tools; no service, paid session or background process is
 required. File records are the storage interface; switching to a database needs
 an importer preserving IDs, provenance and revisions, not just a path change.
@@ -41,7 +80,8 @@ an importer preserving IDs, provenance and revisions, not just a path change.
    already known. Assign a stable decision ID; record a pending revision before
    asking. Do not invent alternatives or reasons that were never available.
 2. Recall relevant confirmed decisions and active principles for this project
-   and domain. Read the domain index first, then only linked relevant records.
+   and domain. Read the domain index first, then locate linked IDs in the
+   relevant domain JSONL files rather than reading every domain.
    Preserve conditions and exceptions. An explicit current instruction wins;
    prefer specific applicable scope over general defaults. Surface unresolved
    conflicts instead of silently treating recency as a universal override.
@@ -80,7 +120,28 @@ an importer preserving IDs, provenance and revisions, not just a path change.
    Never promote an inference to explicit confirmation without user evidence.
 4. Update the relevant domain index with record/principle IDs. Briefly tell the
    user what was learned and which related skill changed or remains pending.
-   Do not add an instinct block to routine answers with no decision request.
+   Use the required recording receipt below, even when no question was asked.
+
+## Required recording receipt
+
+Whenever this turn persists a decision or principle revision, verify the saved
+record and append this block below the main response, including any required
+language-practice block. Use one receipt for the turn, listing each affected
+domain/file and ID when multiple records were written:
+
+🧠
+EvolvingMe: Recorded — <short summary of the choice; pending/confirmed/declined or principle status>.
+Domain: <domain> | File: <selected-root-relative JSONL path> | ID: <record ID>
+Skill sync: <target and applied/pending/conflict/failed, or not applicable>.
+🧠
+
+Show the receipt for backfills and corrections too. If a question's instinct
+block is also needed, combine the instinct and receipt inside one brain frame,
+labeling the instinct separately from the saved choice. A receipt confirms
+persistence, not activation alone or successful implementation. On failed or
+blocked writes, use `EvolvingMe: Not recorded — <reason>` in the same frame
+and identify any partial success precisely. Routine answers with neither a
+write nor a decision question need no block.
 
 ## Synchronize related skills
 
@@ -100,8 +161,8 @@ If editing is blocked, retain the concrete proposed change locally and report
 the blocker without claiming synchronization succeeded. Retry only after the
 blocker changes. Do not recursively trigger EvolvingMe on its own bookkeeping.
 
-If no skill owns the topic, create `data/domains/<topic-slug>/principles.md`
-inside EvolvingMe (or the configured data root). Include scoped principles,
+If no skill owns the topic, create `domains/<topic-slug>/principles.md`
+relative to the selected data root. Include scoped principles,
 evidence IDs and candidate skill purpose/triggers. This is a domain notebook,
 not a newly installed skill; create/register a full skill only when requested.
 Keep this fallback even when a future skill owns the topic, pointing to its
