@@ -7,6 +7,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 
 | Skill | Scope | Description |
 |---|---|---|
+| `guardails` | global | Requires explicit permission before accessing, using, changing, or sharing private information and credentials. Instruction-based; requires the agent to load the skill. |
 | `english-practice` | project | Always responds in English; corrects grammar, word choice, phrasing. |
 | `memory-orchestrate` | project | Project memory: session log, core concepts, user-stated memories. |
 | `learning-instruct` | project | Structured learning tutor with goal setting, teaching steps, and quizzes. |

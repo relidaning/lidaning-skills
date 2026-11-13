@@ -1,4 +1,6 @@
 skills:
+  - name: guardails
+    path: skills/guardails
   - name: project-rules
     path: skills/project-rules
   - name: english-practice
