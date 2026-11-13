@@ -13,3 +13,6 @@ skills/**/chroma.log
 
 # Runtime tool audits can contain private vault queries and source paths.
 skills/*/logs/
+
+# Payload-free operational CLI logs.
+/logs/

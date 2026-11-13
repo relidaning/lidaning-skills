@@ -27,9 +27,30 @@ SSH/cloud/browser profiles, private vaults, databases, backups, logs, environmen
 variables, and authenticated services. Public documentation and clearly
 synthetic placeholders are safe unless they contain actual private data.
 
+## Standing allowlist: EvolvingMe local memory
+
+User-authorized exception (principle `97350a15-302b-4454-a711-b5873a38f36f`): EvolvingMe may save minimal, redacted decision and
+principle summaries from the active conversation, recall relevant existing
+EvolvingMe records, and maintain their revisions and indexes without another
+permission prompt. This standing exception applies across sessions until revoked.
+It covers `<app-root>/data/evolvingme/` (resolve the real skill source), or an
+absolute `EVOLVINGME_DATA_DIR` explicitly selected by the user. It covers the
+SQLite database and its journals, legacy EvolvingMe JSONL records, local import
+between those formats within that root, and domain notebooks. It also permits
+payload-free operational logs under `<app-root>/logs/`.
+
+This is a workflow-specific exception, not an allowlist for arbitrary files in
+those directories. Do not include secrets, raw conversation dumps, health or
+financial details, or unnecessary personal information. Reading unrelated
+histories, vaults, credentials or authenticated services, exporting/uploading
+memory, and training still require separate authorization. Forget/delete actions
+require the user's request and must reconcile derived records and notebooks.
+A different destination requires explicit user selection. This exception does
+not override host filesystem permissions or sandbox restrictions.
+
 ## Obtain permission before access
 
-Before any operation involving protected information, check whether the user
+Outside the standing allowlist, before any operation involving protected information, check whether the user
 has already explicitly authorized that operation on that source in this session.
 Permission must cover the data, purpose, action, and any destination. A general
 request such as “debug the app,” available tool access, or a tool's own approval

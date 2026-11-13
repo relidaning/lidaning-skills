@@ -1,57 +1,33 @@
 # Decision data contract (version 1)
 
-Runtime layout, all relative to the selected data root (default
-`<app-root>/data/evolvingme/`, resolved as described in `../SKILL.md`):
+Runtime storage is `<data-root>/evolvingme.sqlite3`; see [SQLite usage](sqlite.md).
+The complete revision JSON shape remains version 1 and is validated against
+`record.schema.json` including UUID and timestamp formats. Domain notebooks
+remain at `domains/<topic-slug>/principles.md`.
 
-```text
-decisions/<domain>.jsonl
-principles/<domain>.jsonl
-domains/<topic-slug>/principles.md
-```
+Use UUIDs for record and revision IDs and UTC ISO 8601 revision timestamps.
+Each revision is a complete object. `supersedes` is its predecessor revision ID,
+or null on creation. Confirming a pending decision preserves its record ID.
 
-Use one domain file for related decisions, such as `coding.jsonl` or
-`layout.jsonl`. Reuse existing domain slugs instead of creating near-duplicates;
-the filename's domain must match `scope.domain`. Keep one primary domain per
-decision and retain project scope inside each record. Principles use the same
-domain organization in their separate directory. Indexes link IDs and files,
-not line numbers, which may change during recovery or deletion.
+The helper uses `BEGIN IMMEDIATE` to serialize writers and `synchronous=FULL`
+for commits. Identical revision retries are idempotent; reused revision IDs with
+different content fail. Updates must supersede the current head of the same ID
+and kind, including domain reclassification. A stale writer fails instead of
+creating a branch. The indexed `heads` view is rebuildable navigation, not
+additional evidence, and changes atomically with each revision.
 
-Use UUIDs for IDs and revision IDs, UTC ISO 8601 timestamps, UTF-8 JSONL,
-and the schema beside this file for each line. Each revision is one complete
-JSON object on one line, followed by a newline; escape embedded newlines.
-Validate before appending. Create the domain file if absent, otherwise append
-without truncating existing records. Serialize writers using an exclusive
-per-domain lock covering read/check/append, including migrations and repairs;
-all writers must use the same lock (for example `<data-root>/.locks/<domain>.lock`
-with an OS advisory file lock). Flush and fsync before reporting success.
-Under the lock, check revision IDs: identical existing revisions are idempotent
-retries; a reused ID with different content is an error. Validate the predecessor
-and current head before appending a superseding revision.
+Legacy domain JSONL imports validate every record, domain, kind and revision
+chain and preserve complete bodies including IDs, provenance and timestamps.
+They run in one transaction, order predecessors before successors, reject
+conflicts or incomplete/invalid lines, and leave source files untouched. Repeated
+imports are safe. Do not remove legacy originals without authorization; after
+cutover they are historical copies and must also be reconciled on forget requests.
 
-If the last line is incomplete or invalid after an interrupted write, stop
-appending and report the blocker; do not append onto a damaged tail or silently
-discard evidence. Readers may use valid earlier lines but must disclose partial
-coverage. Repair only within authorized scope. Explicit forget/delete requests
-are an exception to append-only storage: rewrite affected files atomically under
-the same lock, removing affected revisions and derived data without backups of
-forgotten content. A revision's
-`supersedes` is its predecessor revision ID, or null on creation. Do not change
-IDs when a pending decision is confirmed.
-
-Records form revision chains. The current revision is the sole unsuperseded
-head, not simply the last line or newest timestamp. Multiple heads mean a
-concurrent-update conflict: preserve both and resolve explicitly before
-export or synchronization. Indexes are rebuildable navigation, never evidence.
-Each domain notebook lists record IDs, a short scope, active principle IDs,
-and the owning skill or proposed skill purpose. Avoid copying raw records.
-
-To migrate legacy per-revision JSON files, validate each record and append it to
-the matching domain file under the same lock, preserving IDs, revisions,
-timestamps, provenance and supersedes links. Verify persisted records before
-removing their authorized legacy copies. Reclassification appends a superseding
-revision with the new domain; preserve its predecessor in the old domain and
-update the index to link both files. A layout-only migration leaves the per-line
-schema version at 1.
+Explicit forget requests are an exception to append-only evidence. Delete all
+revisions for each affected ID with `forget`, then reconcile derived principles,
+notebooks, authorized legacy copies and any authorized exports. SQLite uses
+secure_delete with rollback journals; this does not promise erasure from backups,
+filesystem snapshots or storage hardware. No audit payload retains deleted data.
 
 Decision `payload` fields:
 

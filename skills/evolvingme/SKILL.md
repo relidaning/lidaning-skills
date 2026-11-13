@@ -64,15 +64,21 @@ and unnecessary personal details; use minimal redacted summaries. Exporting
 data or training a model is a separate operation requiring user authorization.
 Do not claim that local storage is encrypted or technically access controlled.
 
-Read [the record contract](references/records.md) before writing records. The
-machine contract is [record.schema.json](references/record.schema.json).
-Group decisions by domain in `decisions/<domain>.jsonl` (for example,
-`coding.jsonl` or `layout.jsonl`); append one validated revision per line to
-the existing domain file. Store principles in `principles/<domain>.jsonl`.
-Use the contract's locking and recovery rules; never overwrite earlier revisions.
-Use ordinary file tools; no service, paid session or background process is
-required. File records are the storage interface; switching to a database needs
-an importer preserving IDs, provenance and revisions, not just a path change.
+Read [the record contract](references/records.md) before writing records and
+[SQLite usage](references/sqlite.md) for commands, migration and recovery.
+SQLite is the default storage interface: `<data-root>/evolvingme.sqlite3`.
+Use `scripts/store.py` relative to the real skill source; send complete revisions
+on stdin, never in shell arguments. It validates the existing JSON schema and
+atomically appends revisions and updates the indexed head view. Never directly
+edit database rows or overwrite earlier revisions. No service or paid session
+is needed. The Guardails standing allowlist covers this minimal local workflow.
+
+Legacy JSONL files are migration inputs, not a parallel writable backend.
+Before first recording against an existing root, explicitly import its
+`decisions/` and `principles/` files with `import-jsonl <data-root>`. Imports are
+transactional and idempotent; originals remain untouched. Do not silently read
+or migrate former roots. A root containing legacy records must be imported
+before recall or append, so older evidence is not silently omitted.
 
 ## Before asking for instructions
 
@@ -80,8 +86,8 @@ an importer preserving IDs, provenance and revisions, not just a path change.
    already known. Assign a stable decision ID; record a pending revision before
    asking. Do not invent alternatives or reasons that were never available.
 2. Recall relevant confirmed decisions and active principles for this project
-   and domain. Read the domain index first, then locate linked IDs in the
-   relevant domain JSONL files rather than reading every domain.
+   and domain. Query indexed current heads with `list --domain <domain>`, then use
+   `list --id <id>` for linked records; do not scan every domain.
    Preserve conditions and exceptions. An explicit current instruction wins;
    prefer specific applicable scope over general defaults. Surface unresolved
    conflicts instead of silently treating recency as a universal override.
@@ -118,7 +124,9 @@ an importer preserving IDs, provenance and revisions, not just a path change.
    situational choice stays situational. Label inferred principles tentative;
    preserve supporting decision IDs, scope, exceptions and counterevidence.
    Never promote an inference to explicit confirmation without user evidence.
-4. Update the relevant domain index with record/principle IDs. Briefly tell the
+4. Verify the saved revision with `list --id <id>`; the database head view
+   is the automatically updated domain index. Maintain domain notebooks for
+   ownership and fallback principles where needed. Briefly tell the
    user what was learned and which related skill changed or remains pending.
    Use the required recording receipt below, even when no question was asked.
 
@@ -131,7 +139,7 @@ domain/file and ID when multiple records were written:
 
 🧠
 EvolvingMe: Recorded — <short summary of the choice; pending/confirmed/declined or principle status>.
-Domain: <domain> | File: <selected-root-relative JSONL path> | ID: <record ID>
+Domain: <domain> | File: evolvingme.sqlite3 (revision <revision ID>) | ID: <record ID>
 Skill sync: <target and applied/pending/conflict/failed, or not applicable>.
 🧠
 
@@ -175,7 +183,8 @@ or persist after a session ends by itself. Save updates during the active turn.
 Do not modify global agent instructions or install hooks to force activation.
 If storage is unavailable, continue the user's task and disclose the unsaved
 update; never pretend memory was written. Corrections append superseding
-revisions. Explicit forget/delete requests remove affected source records,
+revisions. Explicit forget/delete requests use `forget <id>` for all affected IDs and
+remove affected source records,
 derived principles and exports within authorized scope, and reconcile rules
 propagated to other skills. Preserve no copy of forgotten content in an audit
 entry; report any destination that cannot be cleaned up.
