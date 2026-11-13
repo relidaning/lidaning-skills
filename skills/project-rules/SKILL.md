@@ -5,7 +5,9 @@ description: >
   reviewing, optimizing, or configuring a project with executable scripts,
   services, build commands, or automation. Reorganize existing files during
   project-wide optimization, keep project directories coherent, centralize
-  portable configuration, require daily application logs and corresponding
+  portable configuration, understand architecture through targeted code discovery,
+  organize logic and interfaces, analyze memory and performance, design recovery,
+  require daily application logs and corresponding
   metric visualizations, and make technology choices and replacement boundaries
   visible. Applies across projects.
 ---
@@ -27,6 +29,32 @@ Respect explicit user instructions and project-specific constraints.
 - For a specific bug, feature or configuration-only request, apply the rules to
   the affected area without expanding into a project-wide reorganization. A
   review-only request produces findings rather than file changes.
+
+## Understand before changing
+
+- Start with project guidance, manifests, the directory tree and documented
+  entrypoints. Form a small working map of affected components, dependencies,
+  data ownership and execution flow; verify it against actual code. Distinguish
+  observed facts from hypotheses and stale documentation.
+- Find code by symbols, routes, commands, events and configuration keys using
+  file discovery and targeted search. Trace the relevant entrypoint through its
+  callers, business logic and side effects, then inspect contracts and tests.
+  Expand only when a dependency or unresolved question requires it; do not read
+  the entire repository to make a local change.
+- Before implementing, identify the behavior to preserve, the invariant to
+  change, the owning module and affected consumers. For architectural or
+  structural work, read [architecture guidance](references/architecture.md)
+  and use it to organize the implementation, not merely write a design report.
+- For project-wide optimization, also read
+  [runtime efficiency and recovery](references/runtime.md). Inspect applicable
+  performance, memory, concurrency and recovery paths; prioritize measured
+  bottlenecks and correctness risks. For a narrower task, load this reference
+  when those concerns are implicated, without expanding into an unrelated audit.
+- Keep durable project knowledge in the established architecture guide or
+  concepts file, linked from the agent entrypoint. Record useful entrypoints,
+  dependency boundaries, invariants, reasons and verification commands. Update
+  affected facts after changes; avoid duplicate memories, source-code dumps,
+  secrets and unverified claims. Verify remembered claims before relying on them.
 
 ## Coherent project layout
 
@@ -200,7 +228,10 @@ compatibility references or historical records. Check that runtime data remains
 separate from versioned code and its configured paths still resolve.
 
 Report concrete old-to-new paths, reference updates, where to edit configuration
-and which checks ran. For project-wide optimization, explicitly report the
+and which checks ran. For architecture or runtime work, report the changed
+boundaries, preserved contracts, measured outcomes and remaining uncertainties;
+do not claim efficiency or recovery improvements without supporting evidence.
+For project-wide optimization, explicitly report the
 layout outcome: changes made, or why the inspected layout needs no changes.
 Identify any deferred moves and the concrete blocker; do not present a
 configuration-only result as a completed project-wide optimization while known

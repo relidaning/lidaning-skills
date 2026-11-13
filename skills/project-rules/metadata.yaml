@@ -1,4 +1,4 @@
 name: project-rules
-description: Reorganize existing project files, centralize portable configuration, and document replaceable technology choices for executable projects.
+description: Understand architecture, organize reusable logic and interfaces, analyze runtime efficiency and recovery, and maintain portable project configuration.
 scope: global
-tags: [project, rules, organization, configuration, portability, architecture]
+tags: [project, rules, organization, configuration, portability, architecture, performance, recovery]
