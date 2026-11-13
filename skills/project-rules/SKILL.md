@@ -5,7 +5,8 @@ description: >
   reviewing, optimizing, or configuring a project with executable scripts,
   services, build commands, or automation. Reorganize existing files during
   project-wide optimization, keep project directories coherent, centralize
-  portable configuration, and make technology choices and replacement boundaries
+  portable configuration, require daily application logs and corresponding
+  metric visualizations, and make technology choices and replacement boundaries
   visible. Applies across projects.
 ---
 
@@ -49,7 +50,7 @@ Respect explicit user instructions and project-specific constraints.
   | Docker and deployment | `docker/` or `deploy/` for shared Dockerfiles, Compose files and deployment assets; component Dockerfiles may live with their service. Keep root files when tooling expects them. |
   | Database definitions | `db/` for migrations, schemas and seed definitions, or the framework's established equivalent. Keep these versioned and separate from mutable database storage. |
   | Runtime data | Configured storage outside source directories: Docker named volumes or a dedicated ignored directory such as `var/` or `data/`. Include databases, uploads, caches and local dumps; keep intentional test fixtures with tests. |
-  | Log files | Ignored project-root `logs/` for application, training and diagnostic logs, separate from `data/` and source code. Make the path configurable and use a persistent container mount when file logging is enabled. Database journals and broker transaction logs remain with their data storage. |
+  | Log files | Required `<app-root>/logs/YYYY-MM-DD.log` for application, training and diagnostic logs; ignore `logs/` in version control and keep it separate from `data/` and source code. Persist container logs to this host location. Database journals and broker transaction logs remain with their data storage. |
   | Documentation | `docs/` for detailed guides and architecture; keep a concise root `README.md` linking to them and retain agent/tool entrypoints where discovery requires them. |
   | Tests and static assets | Follow the framework's test and asset conventions; use colocated tests or `tests/`, and established `public/` or `assets/` locations. |
 
@@ -70,6 +71,82 @@ Respect explicit user instructions and project-specific constraints.
   entrypoints when needed, and validate affected commands from their documented
   working directories. Do not move live database files or volumes as incidental
   cleanup; treat storage relocation as an explicit data migration.
+
+## Required application logging
+
+- Every runnable or executable app project must have a working logging
+  mechanism, including CLI tools, scripts, scheduled jobs and services. When
+  creating or changing an executable app, inspect its logging and add or repair
+  it if missing. A review-only request reports gaps without modifying files.
+- Write logs to `<app-root>/logs/YYYY-MM-DD.log` (for example,
+  `logs/2026-11-13.log`). Resolve the app root independently of the caller's
+  working directory. Create `logs/` automatically, append without truncating
+  earlier runs, and switch to the new date's file across midnight in long-running
+  processes. Use one documented timezone for filenames and entry timestamps.
+- Reuse the app's native logging facilities and wire them into its executable
+  entrypoints. Include timestamps, severity and useful operation context; capture
+  lifecycle events, important outcomes and errors with diagnostic details.
+  Preserve CLI output and exit codes. Console-only logging is insufficient;
+  never record credentials, tokens or other sensitive payloads.
+- Keep log levels and retention settings in the existing configuration system.
+  Ignore generated `logs/` files in version control. For containers, mount the
+  log directory persistently so files appear at the host app root's `logs/`;
+  document the mapping. For browser or restricted runtimes without filesystem
+  access, use a host/backend logging sink that writes this path and explain any
+  platform blocker rather than claiming console output satisfies the rule.
+- Validate with isolated temporary app roots: a normal run and an error produce
+  useful entries at the required path, repeated runs append, launching from
+  another working directory keeps the same destination, and long-running apps
+  roll over by date. Check retention and concurrent writers where applicable;
+  use a controlled clock rather than waiting overnight or starting live services.
+
+## Required log-based visualization
+
+- Every runnable or executable app with logging must provide useful
+  visualizations derived from its `<app-root>/logs/YYYY-MM-DD.log` records.
+  When creating or changing an executable app, inspect and add or repair this
+  capability alongside its logging. Apply it within the current project;
+  review-only requests report gaps without implementing them.
+- Match the app's visual style, user-facing language, domain terminology and
+  technology stack. Extend an existing chart page or module where available;
+  for CLI tools and batch jobs, a terminal dashboard or generated HTML report
+  may fit better than a new web service. Make the result reachable through a
+  documented page, command or report path. Reuse suitable existing charting
+  facilities rather than introducing a separate monitoring stack by default.
+- Choose core metrics for the actual workload. Services should show request
+  volume and QPS, error rate, and latency trends (including p50/p95 where useful).
+  Jobs and scripts should show run counts, success/failure rate, duration and
+  work throughput. Model workloads should show applicable inference latency,
+  request/token throughput and failures; training/evaluation workloads should
+  show recorded loss, quality metrics and progress. Include resource usage or
+  cost only when measured or explicitly identified as an estimate.
+- Make the logs sufficient to compute those metrics: use consistently parseable
+  events with timestamps, operation/service/model identifiers, outcomes and
+  durations or work counts as needed. Reuse the existing format or extend it
+  compatibly. Distinguish one completed operation from its diagnostic messages
+  and individual retry attempts to avoid double-counting. Do not infer request
+  error rate from the proportion of log lines marked ERROR.
+- Define metric units, time buckets, timezone and counting semantics. Compute
+  QPS as request count divided by the bucket's duration in seconds, and error
+  rate as failed operations divided by total eligible operations in the same
+  window. Treat zero denominators and missing observations explicitly; show
+  unavailable data rather than invented values. Note sampling, retention gaps
+  and incomplete coverage that limit interpretation.
+- Use time-series charts for trends and suitable summaries or breakdowns for
+  failures and workload comparisons. Label axes and units, expose the selected
+  time range and relevant service/model/run filters, and show empty/error states
+  plus data freshness. Provide readable values alongside color distinctions.
+  Choose live refresh for active monitoring or a dated snapshot for reports,
+  according to the app's workflow.
+- Read daily files across the selected range, including rollover. Handle partial
+  or malformed records without crashing or silently misrepresenting coverage.
+  Bound parsing and aggregation work as logs grow; keep refresh and range limits
+  in the existing configuration. Keep raw logs and sensitive details out of
+  public assets; use existing access controls for operational views.
+- Validate aggregation against small, known log fixtures, covering success,
+  failure, retries, empty windows and midnight boundaries. Check the resulting
+  charts or reports display the expected values, filters, units and empty states.
+  Document how to open or generate the visualization and which metrics it covers.
 
 ## Portable configuration
 
