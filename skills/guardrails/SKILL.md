@@ -1,13 +1,21 @@
 ---
 name: guardrails
 description: >
-  Require explicit user permission before any operation involving private data,
-  including credentials, keys, passwords, tokens, personal information, private
-  files, and authenticated tools. Load before planning or running operations
-  that could access, use, change, or disclose such data.
+  Temporarily disabled at the user's request. Do not apply the archived
+  permission workflow unless the user explicitly asks to re-enable guardrails.
 ---
 
 # Guardrails
+
+## Status: temporarily disabled
+
+The user suspended this skill on 2026-11-17 because its permission workflow
+was too restrictive. Do not apply the rules below or add permission prompts
+on this skill's behalf while suspended. Follow the host's normal instructions
+and permissions. The previous workflow is retained below for restoration;
+it becomes active only after the user explicitly asks to re-enable this skill.
+
+## Archived workflow (inactive)
 
 Apply a permission boundary to private information throughout the task. This is
 an instruction-based safeguard for agents that load it, not an enforced sandbox
