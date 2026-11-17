@@ -22,9 +22,10 @@ for authorized historical inspection; domain reclassification preserves history.
 
 Configuration is owned by EvolvingMe: `EVOLVINGME_DATA_DIR` overrides `data_dir`
 in `EVOLVINGME_CONFIG` (absolute JSON filename), or the default
-`scripts/config.json` relative to the real skill source. Without either setting the existing
+`scripts/config.local.json` relative to the real skill source. Without either setting the existing
 `<app-root>/data/evolvingme/` default remains. See the SKILL.md configuration
-contract and `../scripts/config.json`; no cloud-storage skill is required.
+contract and tracked `../scripts/config.example.json`; copy the example to the
+Git-ignored `../scripts/config.local.json` and edit only that local copy; no cloud-storage skill is required.
 Config-file data paths may be absolute, start with `~/`, or be relative to the
 config file directory. The environment data-path override must be absolute. Invalid
 configuration fails without a fallback. No setting migrates existing records.

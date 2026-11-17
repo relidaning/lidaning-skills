@@ -134,9 +134,9 @@ HF `daily_papers` for today and recent dates; dedupe, present upvotes + titles.
 
 ### Store in Nextcloud (standard step after every download)
 
-Every verified download is uploaded to Nextcloud `papers/` — the one
-directory the `nextcloud` skill's allowlist permits. Use curl WebDAV
-directly (not MCP write — PDFs are too big to pipe through context):
+Every verified download is uploaded to this skill's Nextcloud `papers/`
+destination. This storage workflow is owned by paper-fetch and requires
+authorization for that destination. Use curl WebDAV directly:
 
 ```bash
 source ~/.zshrc.local   # NEXTCLOUD_HOST / _USERNAME / _PASSWORD (app password)

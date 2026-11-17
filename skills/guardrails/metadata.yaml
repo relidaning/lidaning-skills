@@ -1,4 +1,4 @@
-name: guardails
+name: guardrails
 description: Require explicit permission before accessing, using, changing, or sharing private information and credentials.
 scope: global
 tags: [privacy, permissions, credentials, security]

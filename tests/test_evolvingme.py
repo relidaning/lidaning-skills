@@ -155,10 +155,32 @@ class StoreTests(unittest.TestCase):
     def test_default_config_is_skill_relative(self):
         skill = self.base / 'skills/evolvingme'
         (skill / 'scripts').mkdir(parents=True)
-        (skill / 'scripts/config.json').write_text(
+        (skill / 'scripts/config.local.json').write_text(
             json.dumps({'data_dir': '../../../data/evolvingme'}))
         with patch.dict('os.environ', {}, clear=True), patch.object(store, 'SKILL', skill):
             self.assertEqual(store.root(), self.base / 'data/evolvingme')
+
+    def test_local_config_default_and_invalid_values(self):
+        skill = self.base / 'skills/evolvingme'
+        scripts = skill / 'scripts'
+        scripts.mkdir(parents=True)
+        # Neither a tracked example nor an obsolete tracked config selects storage.
+        for name in ('config.example.json', 'config.json'):
+            (scripts / name).write_text('{"data_dir": "wrong"}')
+        with patch.dict('os.environ', {}, clear=True), patch.object(store, 'SKILL', skill), patch.object(store, 'APP', self.base):
+            self.assertEqual(store.root(), self.base / 'data/evolvingme')
+            local = scripts / 'config.local.json'
+            local.write_text('{"data_dir": "custom.sqlite3"}')
+            self.assertEqual(store.database_path(), scripts / 'custom.sqlite3')
+            selected = self.base / 'selected.json'
+            selected.write_text('{"data_dir": "selected.sqlite3"}')
+            with patch.dict('os.environ', {'EVOLVINGME_CONFIG': str(selected)}):
+                self.assertEqual(store.database_path(), self.base / 'selected.sqlite3')
+            local.write_text('invalid JSON')
+            with self.assertRaises(ValueError):
+                store.database_path()
+            with patch.dict('os.environ', {'EVOLVINGME_DATA_DIR': str(self.base / 'override')}):
+                self.assertEqual(store.root(), self.base / 'override')
 
     def test_relative_override_rejected(self):
         with patch.dict('os.environ', {'EVOLVINGME_DATA_DIR': 'relative'}):

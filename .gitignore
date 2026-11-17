@@ -16,3 +16,6 @@ skills/*/logs/
 
 # Payload-free operational CLI logs.
 /logs/
+
+# Instance-specific EvolvingMe database source.
+/skills/evolvingme/scripts/config.local.json

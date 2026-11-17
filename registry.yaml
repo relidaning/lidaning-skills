@@ -1,8 +1,8 @@
 skills:
   - name: evolvingme
     path: skills/evolvingme
-  - name: guardails
-    path: skills/guardails
+  - name: guardrails
+    path: skills/guardrails
   - name: project-rules
     path: skills/project-rules
   - name: english-practice
@@ -19,8 +19,6 @@ skills:
     path: skills/model-switch
   - name: sub-maxer
     path: skills/sub-maxer
-  - name: nextcloud
-    path: skills/nextcloud
   - name: paper-fetch
     path: skills/paper-fetch
   - name: context-summarize

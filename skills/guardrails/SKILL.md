@@ -1,5 +1,5 @@
 ---
-name: guardails
+name: guardrails
 description: >
   Require explicit user permission before any operation involving private data,
   including credentials, keys, passwords, tokens, personal information, private
@@ -7,7 +7,7 @@ description: >
   that could access, use, change, or disclose such data.
 ---
 
-# Guardails
+# Guardrails
 
 Apply a permission boundary to private information throughout the task. This is
 an instruction-based safeguard for agents that load it, not an enforced sandbox
@@ -33,8 +33,16 @@ User-authorized exception (principle `97350a15-302b-4454-a711-b5873a38f36f`): Ev
 principle summaries from the active conversation, recall relevant existing
 EvolvingMe records, and maintain their revisions and indexes without another
 permission prompt. This standing exception applies across sessions until revoked.
-It covers `<app-root>/data/evolvingme/` (resolve the real skill source), or an
-absolute `EVOLVINGME_DATA_DIR` explicitly selected by the user. It covers the
+It covers the local storage selected by EvolvingMe's configuration precedence:
+`EVOLVINGME_DATA_DIR`, then `data_dir` in `EVOLVINGME_CONFIG` or the ignored
+`scripts/config.local.json`, then `<app-root>/data/evolvingme/` (resolve the real
+skill source). Both directory and explicit SQLite-file settings are covered;
+relative file-config values resolve against that configuration file's directory.
+Reading these non-secret storage settings to resolve the destination is covered.
+Do not require another permission prompt solely because the configured local
+storage is outside the default root, including a user-managed synchronized folder.
+This clarification follows principle `bc60052a-53ea-4b77-9493-0c75ba8f26c1`:
+allow EvolvingMe recording at its configured local destination. It covers the
 SQLite database and its journals, legacy EvolvingMe JSONL records, local import
 between those formats within that root, and domain notebooks. It also permits
 payload-free operational logs under `<app-root>/logs/`.
@@ -45,7 +53,8 @@ financial details, or unnecessary personal information. Reading unrelated
 histories, vaults, credentials or authenticated services, exporting/uploading
 memory, and training still require separate authorization. Forget/delete actions
 require the user's request and must reconcile derived records and notebooks.
-A different destination requires explicit user selection. This exception does
+An unconfigured destination or a remote API still requires explicit authorization.
+This exception does not authorize configuring sync clients or using their credentials. This exception does
 not override host filesystem permissions or sandbox restrictions.
 
 ## Obtain permission before access
@@ -59,11 +68,11 @@ private document does authorize that read for the stated purpose; it does not
 authorize unrelated documents or sharing its contents elsewhere.
 
 If permission is missing or ambiguous, pause the affected operation and ask.
-Explain that the `guardails` skill requires permission, identify the source or
+Explain that the `guardrails` skill requires permission, identify the source or
 data category without revealing values, describe the action and purpose, and
 name any recipient, service, or output destination. For example:
 
-> The guardails skill requires permission before accessing credentials. May I
+> The guardrails skill requires permission before accessing credentials. May I
 > read only `SERVICE_API_KEY` from the project's `.env` and use it to authenticate
 > a request to the configured service? I will omit the value from output.
 

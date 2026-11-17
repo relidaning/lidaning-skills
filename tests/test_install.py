@@ -66,17 +66,13 @@ class InstallTests(unittest.TestCase):
 
     def test_global_paths_and_env_agent(self):
         env = dict(self.env, LDN_AGENT="codex")
-        self.run_cli(["nextcloud", "--global"], env=env)
-        self.assertTrue((self.home / ".agents/skills/nextcloud").is_symlink())
+        self.run_cli(["learning-instruct", "--global"], env=env)
+        self.assertTrue((self.home / ".agents/skills/learning-instruct").is_symlink())
         config = self.home / "custom-codex/config.toml"
-        server = self.read_config(config)["mcp_servers"]["nextcloud"]
-        self.assertEqual(server["command"], "uvx")
-        self.assertEqual(set(server["env_vars"]),
-                         {"NEXTCLOUD_HOST", "NEXTCLOUD_USERNAME", "NEXTCLOUD_PASSWORD"})
-        self.assertNotIn("env", server)
+        self.assertFalse(config.exists())
         self.assertFalse((self.project / ".codex").exists())
-        self.run_cli(["nextcloud", "--global", "--remove"], env=env)
-        self.assertNotIn("mcp_servers", self.read_config(config))
+        self.run_cli(["learning-instruct", "--global", "--remove"], env=env)
+        self.assertFalse(config.exists())
 
     def test_mcp_preserves_settings_and_comments(self):
         config = self.project / ".codex/config.toml"
@@ -135,7 +131,7 @@ class InstallTests(unittest.TestCase):
         line = next(line for line in output.splitlines() if "english-practice" in line)
         self.assertIn("[installed]", line)
         self.run_cli(["mcp", "inject", "--agent", "codex"], entry="bin/ldn")
-        self.assertEqual(set(self.read_config()["mcp_servers"]), {"nextcloud", "obsidian-vault", "rag"})
+        self.assertEqual(set(self.read_config()["mcp_servers"]), {"obsidian-vault", "rag"})
         self.assertFalse((self.project / ".mcp.json").exists())
 
     def test_ldn_global_interactive_install_list_and_remove(self):
@@ -179,7 +175,7 @@ class InstallTests(unittest.TestCase):
         self.run_cli(["mcp", "--global", "inject", "--agent", "codex"], entry="bin/ldn")
         config = self.home / "custom-codex/config.toml"
         self.assertEqual(set(self.read_config(config)["mcp_servers"]),
-                         {"nextcloud", "obsidian-vault", "rag"})
+                         {"obsidian-vault", "rag"})
         self.assertEqual(list(self.project.iterdir()), [])
 
     def test_node_cli_uses_shared_installer(self):

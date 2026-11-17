@@ -48,11 +48,14 @@ containing `evolvingme.sqlite3` and domain notebooks through:
 
 1. `EVOLVINGME_DATA_DIR`, when set (highest priority).
 2. `data_dir` in the JSON file selected by absolute `EVOLVINGME_CONFIG`, or
-   `scripts/config.json` relative to the real skill source when no file is selected.
+   `scripts/config.local.json` relative to the real skill source when no file is selected.
 3. The existing `<app-root>/data/evolvingme/` default when no setting is supplied.
 
-Edit [scripts/config.json](scripts/config.json) directly to set `data_dir`.
-The shipped relative value preserves `<app-root>/data/evolvingme/`. Relative
+Copy [scripts/config.example.json](scripts/config.example.json) to
+`scripts/config.local.json` and edit the local copy to set `data_dir`. The local
+file is ignored by Git so pulling updates preserves each instance’s settings.
+Never put instance settings in the tracked example. With no local file, the
+built-in default preserves `<app-root>/data/evolvingme/`. Relative
 `data_dir` values resolve against the selected config file's directory, never
 against the working directory. Absolute paths and leading `~/` are supported.
 `EVOLVINGME_DATA_DIR` remains an absolute-path override. Unknown keys, empty
@@ -61,9 +64,15 @@ rather than silently selecting another database. An explicit data-directory
 environment override bypasses file configuration. Keep database contents out of
 version control and do not put credentials in this configuration.
 
+For existing installations, copy the previous `scripts/config.json` to
+`scripts/config.local.json` before pulling this change; the old tracked file is
+removed. Keep the same value to preserve the selected database.
+
 Changing the setting selects a source; it does not copy, merge or migrate data.
-Do not move the existing database as part of configuration. Confirm authorization
-for a new destination under Guardails before using it. If the user independently
+Do not move the existing database as part of configuration. Guardrails’ standing
+EvolvingMe exception covers recording at the configured local destination,
+including file-based settings outside the default root, without another prompt.
+Unconfigured destinations and remote APIs still require authorization. If the user independently
 chooses a synchronized folder, synchronization remains their deployment concern:
 close all connections and complete sync on both instances before a sequential
 handoff; never use concurrent writers across instances. SQLite transactions and
@@ -100,7 +109,7 @@ Use `scripts/store.py` relative to the real skill source; send complete revision
 on stdin, never in shell arguments. It validates the existing JSON schema and
 atomically appends revisions and updates the indexed head view. Never directly
 edit database rows or overwrite earlier revisions. No service or paid session
-is needed. The Guardails standing allowlist covers this minimal local workflow.
+is needed. The Guardrails standing allowlist covers this minimal local workflow.
 
 Legacy JSONL files are migration inputs, not a parallel writable backend.
 Before first recording against an existing root, explicitly import its

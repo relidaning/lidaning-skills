@@ -8,7 +8,7 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | Skill | Scope | Description |
 |---|---|---|
 | `evolvingme` | global | Records user decisions, recalls scoped preferences, adds 🧠 instincts to decision questions, and updates related skills. Local data stays ignored; runs when loaded by the agent. |
-| `guardails` | global | Requires explicit permission before accessing, using, changing, or sharing private information and credentials. Instruction-based; requires the agent to load the skill. |
+| `guardrails` | global | Requires explicit permission before accessing, using, changing, or sharing private information and credentials. Instruction-based; requires the agent to load the skill. |
 | `english-practice` | project | Always responds in English; corrects grammar, word choice, phrasing. |
 | `memory-orchestrate` | project | Project memory: session log, core concepts, user-stated memories. |
 | `learning-instruct` | project | Structured learning tutor with goal setting, teaching steps, and quizzes. |
@@ -16,7 +16,6 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 | `obsidian-local` | project | Local Obsidian vault via REST API MCP — search, read, create, update notes. |
 | `rag-chroma` | project | General-purpose RAG: ingest docs/URLs/PDFs, embed, store, retrieve. |
 | `sub-maxer` | project | Documents/manages the keep-alive pings + opportunistic-work loop for Pro/Max limits. |
-| `nextcloud` | project | Work with files in the self-hosted Nextcloud via MCP (WebDAV): list, read, upload, download, move, copy, delete, search. |
 | `skill-bench` | project | Benchmark a skill: frozen, versioned trigger + behavior suites; headless trials; F1, rubric scores, pass@k, CIs, run history. |
 | `git-rules` | global | Personal git/GitHub rules: delete a branch once its PR is merged, repo settings, session notes. New rules are added here instead of the global CLAUDE.md. |
 | `project-rules` | global | Portable configuration and a technology map for projects with executable scripts/services. Load before applicable engineering work. |
@@ -74,7 +73,7 @@ Its MCP servers go into `.codex/config.toml` for a project or
 3.11+ and preserves unrelated TOML settings and comments. Server definitions
 are kept in marked installer-owned blocks; a conflicting manually configured
 server is reported rather than overwritten. Credential references such as
-`${NEXTCLOUD_PASSWORD}` become environment forwarding rules, so export them
+`${SERVICE_API_TOKEN}` become environment forwarding rules, so export them
 before starting Codex. Project MCP settings require a trusted project. See the
 [official MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 

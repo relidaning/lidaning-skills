@@ -23,7 +23,7 @@ def configured_path():
         selected = os.environ.get('EVOLVINGME_CONFIG')
         if selected is not None and (not selected or not Path(selected).is_absolute()):
             raise ValueError('EVOLVINGME_CONFIG must be an absolute filename')
-        config = Path(selected) if selected else SKILL / 'scripts/config.json'
+        config = Path(selected) if selected else SKILL / 'scripts/config.local.json'
         values = {}
         if selected is not None or config.exists():
             values = json.loads(config.read_text())
