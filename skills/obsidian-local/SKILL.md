@@ -118,6 +118,27 @@ down. `tasks-queue` and `sub-maxer` use it.
 2. If RAG is unavailable or returns nothing useful, use `search_notes` (add `pathPrefix` to scope it to a folder).
 3. Present matching paths and snippets.
 
+### Native Vim search exclusions
+
+The user's `leader+sg` / `<Space>sg` means the native Obsidian Search panel
+opened by `vim-file-explorer:toggle-search`, not MCP or RAG queries. Its
+exclusions belong in the vault's `.obsidian/app.json` `userIgnoreFilters`
+(Settings → Files and links → Excluded files). The current native exclusions
+cover `claude-maxer`, `0_lidaning`, `log`/`logs` directories and `.log`/rotated log files.
+`leader+sl` / `<Space>sl` invokes `vim-file-explorer:search-lidaning` for a
+search restricted to `0_lidaning`; its per-run app/cache facade permits that
+otherwise ignored folder without changing other panels. Both editor vimrc and
+the explorer/search leader map define it; the two modes keep separate queries.
+Search leaves can initially contain a DeferredView with no `getQuery` or search
+component. Await `leaf.loadIfDeferred()` before using search APIs, both before
+reading the previous query and after opening the panel. Reveal an existing Search
+leaf directly with `workspace.revealLeaf`; repeatedly running `global-search:open`
+can asynchronously overwrite the query restored for a mode. Verify commands in the
+live renderer: REST command HTTP 204 alone does not prove execution succeeded
+(Obsidian can catch and log the command exception internally).
+Trace the actual keybinding before changing search behavior. Do not substitute
+assistant-side result filtering for a requested plugin/UI change.
+
 ### Read a note
 
 `read_note("path/to/note.md")`. For long notes, run `get_note_outline` first,
