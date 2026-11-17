@@ -137,6 +137,13 @@ cmd_mcp_inject() {
 # ---------------------------------------------------------------------------
 
 cmd_manage() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    printf 'No interactive terminal — showing skills instead.\n'
+    printf 'Use ldn add <name> or ldn remove <name> to manage skills.\n\n'
+    cmd_list
+    return 0
+  fi
+
   if ! command -v gum &>/dev/null; then
     printf "${YELLOW}gum not found — falling back to plain list.${NC}\n"
     printf "Install gum: https://github.com/charmbracelet/gum\n\n"
@@ -158,7 +165,8 @@ cmd_manage() {
 
   local gum_args=(
     choose --no-limit
-    --header="[$AGENT, $SCOPE] Toggle skills / MCP injection  (space=toggle  enter=confirm  q=cancel)"
+    # gum 2.x does not recognize Space reliably; x and Tab work across versions.
+    --header="[$AGENT, $SCOPE] Toggle skills / MCP injection  (x/tab=toggle  enter=confirm  esc=cancel)"
     --cursor-prefix="[ ] "
     --selected-prefix="[x] "
     --unselected-prefix="[ ] "
@@ -233,6 +241,8 @@ usage() {
   printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
   printf "  ${CYAN}ldn${NC}          Toggle skills on/off (checkbox UI)\n"
   printf "  ${CYAN}ldn list${NC}     Plain-text list with install status\n"
+  printf '  ldn add <name...>     Install skills without the checkbox UI\n'
+  printf '  ldn remove <name...>  Remove skills without the checkbox UI\n'
   printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into the selected scope\n\n"
   printf "  --global / -g   Manage skills for all projects (current user)\n"
   printf "  --project / -p  Manage skills in cwd (default)\n\n"
@@ -269,6 +279,14 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 case "${1:-}" in
 list | ls) cmd_list ;;
+add | remove | rm)
+  command="$1"
+  shift
+  [[ $# -gt 0 ]] || { printf 'ldn: %s requires at least one skill name\n' "$command" >&2; exit 1; }
+  installer_args=("$@" "--$SCOPE" --agent "$AGENT")
+  [[ "$command" == "add" ]] || installer_args+=(--remove)
+  "$SKILLS_DIR/install.sh" "${installer_args[@]}"
+  ;;
 mcp)
   case "${2:-}" in
   inject) cmd_mcp_inject ;;

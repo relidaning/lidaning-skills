@@ -1,6 +1,7 @@
 """Installer integration tests. All destinations are isolated temporary paths."""
 import json
 import os
+import pty
 from pathlib import Path
 import subprocess
 import tempfile
@@ -23,12 +24,22 @@ class InstallTests(unittest.TestCase):
                         CODEX_HOME=str(self.home / "custom-codex"),
                         XDG_CONFIG_HOME=str(self.home / "config"), LDN_AGENT="claude")
 
-    def run_cli(self, args, ok=True, entry="install.sh", env=None):
+    def run_cli(self, args, ok=True, entry="install.sh", env=None, terminal=False):
         command = [str(REPO / entry), *args]
         if entry == "cli.js":
             command.insert(0, "node")
-        result = subprocess.run(command, cwd=self.project, env=env or self.env,
-                                capture_output=True, text=True)
+        if terminal:
+            master, slave = pty.openpty()
+            try:
+                result = subprocess.run(command, cwd=self.project, env=env or self.env,
+                                        stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True)
+                result.stdout = ""
+            finally:
+                os.close(slave)
+                os.close(master)
+        else:
+            result = subprocess.run(command, cwd=self.project, env=env or self.env,
+                                    capture_output=True, text=True)
         if ok:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -154,7 +165,7 @@ class InstallTests(unittest.TestCase):
         for agent in ("claude", "codex", "opencode", "both", "all"):
             with self.subTest(agent=agent):
                 args = ["--global", "--agent", agent]
-                self.run_cli(args, entry="bin/ldn", env=env)
+                self.run_cli(args, entry="bin/ldn", env=env, terminal=True)
                 expected = ("claude", "codex") if agent == "both" else tuple(roots) if agent == "all" else (agent,)
                 for name, root in roots.items():
                     self.assertEqual((root / "english-practice").is_symlink(), name in expected)
@@ -164,12 +175,27 @@ class InstallTests(unittest.TestCase):
                 project_output = self.run_cli(["list", "--project", "--agent", agent], entry="bin/ldn", env=env)
                 line = next(line for line in project_output.splitlines() if "english-practice" in line)
                 self.assertIn("[not installed]", line)
-                self.run_cli(args, entry="bin/ldn", env=dict(env, GUM_CHOICE=""))
+                self.run_cli(args, entry="bin/ldn", env=dict(env, GUM_CHOICE=""), terminal=True)
                 gum_args = json.loads((self.root / "gum-args.json").read_text())
                 self.assertIn("--selected=english-practice", gum_args)
+                header = next(arg for arg in gum_args if arg.startswith("--header="))
+                self.assertIn("x/tab=toggle", header)
+                self.assertIn("esc=cancel", header)
                 for root in roots.values():
                     self.assertFalse((root / "english-practice").is_symlink())
                 self.assertEqual(list(self.project.iterdir()), [])
+
+    def test_ldn_without_terminal_and_explicit_commands(self):
+        output = self.run_cli(["--agent", "codex"], entry="bin/ldn")
+        self.assertIn("No interactive terminal", output)
+        self.assertNotIn("Cancelled", output)
+        self.assertEqual(list(self.project.iterdir()), [])
+        target = self.project / ".agents/skills/english-practice"
+        self.run_cli(["add", "english-practice", "--agent", "codex"], entry="bin/ldn")
+        self.assertTrue(target.is_symlink())
+        self.run_cli(["remove", "english-practice", "--agent", "codex"], entry="bin/ldn")
+        self.assertFalse(target.is_symlink())
+        self.run_cli(["add"], ok=False, entry="bin/ldn")
 
     def test_ldn_global_codex_mcp_injection(self):
         self.run_cli(["mcp", "--global", "inject", "--agent", "codex"], entry="bin/ldn")

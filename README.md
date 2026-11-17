@@ -23,11 +23,20 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 ## Quick start
 
 ```bash
+# Make the repo's command available on PATH (once per checkout)
+mkdir -p ~/.local/bin
+ln -s "$PWD/bin/ldn" ~/.local/bin/ldn
+
 # Interactive checkbox UI — toggle skills on/off (requires gum)
+# Press x or Tab to toggle, Enter to apply, Esc to cancel.
 ldn
 
 # Plain list with install status
 ldn list
+
+# Manage skills without an interactive terminal
+ldn add english-practice --agent codex
+ldn remove english-practice --agent codex
 
 # Or use install.sh directly
 ./install.sh english-practice --project
