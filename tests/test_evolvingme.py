@@ -100,6 +100,66 @@ class StoreTests(unittest.TestCase):
         self.assertIn('failures=50.0%', output.getvalue())
         self.assertNotIn('SQLite', json.dumps(events))
 
+    def test_config_source_and_precedence(self):
+        config = self.base / 'config.json'
+        destination = self.base / 'external-data'
+        config.write_text(json.dumps({'data_dir': str(destination)}))
+        with patch.dict('os.environ', {'EVOLVINGME_CONFIG': str(config)}, clear=True):
+            self.assertEqual(store.root(), destination)
+            db = store.connect()
+            try:
+                item = record()
+                with db:
+                    store.append(db, item)
+                self.assertEqual(db.execute('SELECT count(*) FROM heads').fetchone()[0], 1)
+            finally:
+                db.close()
+            self.assertTrue((destination / 'evolvingme.sqlite3').exists())
+            for bad in ({'data_dir': ''},
+                        {'data_dir': 42}, {'unknown': 'value'}, []):
+                config.write_text(json.dumps(bad))
+                with self.assertRaises(ValueError):
+                    store.root()
+            config.write_text('invalid JSON')
+            with self.assertRaises(ValueError):
+                store.root()
+            with patch.dict('os.environ', {'EVOLVINGME_DATA_DIR': str(destination)}):
+                self.assertEqual(store.root(), destination)
+            config.unlink()
+            with self.assertRaises(FileNotFoundError):
+                store.root()
+
+    def test_database_file_config_round_trip(self):
+        config = self.base / 'file-config.json'
+        config.write_text(json.dumps({'data_dir': 'nested/custom.sqlite3'}))
+        destination = self.base / 'nested/custom.sqlite3'
+        item = record()
+        with patch.dict('os.environ', {'EVOLVINGME_CONFIG': str(config)}, clear=True):
+            self.assertEqual(store.database_path(), destination)
+            self.assertEqual(store.root(), destination.parent)
+            db = store.connect()
+            with db:
+                store.append(db, item)
+            db.close()
+            db = store.connect()
+            try:
+                self.assertEqual(json.loads(db.execute('SELECT body FROM heads').fetchone()[0]), item)
+            finally:
+                db.close()
+            self.assertTrue(destination.is_file())
+            directory = self.base / 'directory.sqlite3'
+            directory.mkdir()
+            with patch.dict('os.environ', {'EVOLVINGME_DATA_DIR': str(directory)}):
+                self.assertEqual(store.database_path(), directory / 'evolvingme.sqlite3')
+
+    def test_default_config_is_skill_relative(self):
+        skill = self.base / 'skills/evolvingme'
+        (skill / 'scripts').mkdir(parents=True)
+        (skill / 'scripts/config.json').write_text(
+            json.dumps({'data_dir': '../../../data/evolvingme'}))
+        with patch.dict('os.environ', {}, clear=True), patch.object(store, 'SKILL', skill):
+            self.assertEqual(store.root(), self.base / 'data/evolvingme')
+
     def test_relative_override_rejected(self):
         with patch.dict('os.environ', {'EVOLVINGME_DATA_DIR': 'relative'}):
             with self.assertRaises(ValueError):

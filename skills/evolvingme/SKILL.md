@@ -42,13 +42,42 @@ lost while their implementation is completed.
 
 ## Storage and access
 
+EvolvingMe owns its local data-source configuration. It does not depend on a
+cloud-storage skill, sync client, provider URL or account. Configure the directory
+containing `evolvingme.sqlite3` and domain notebooks through:
+
+1. `EVOLVINGME_DATA_DIR`, when set (highest priority).
+2. `data_dir` in the JSON file selected by absolute `EVOLVINGME_CONFIG`, or
+   `scripts/config.json` relative to the real skill source when no file is selected.
+3. The existing `<app-root>/data/evolvingme/` default when no setting is supplied.
+
+Edit [scripts/config.json](scripts/config.json) directly to set `data_dir`.
+The shipped relative value preserves `<app-root>/data/evolvingme/`. Relative
+`data_dir` values resolve against the selected config file's directory, never
+against the working directory. Absolute paths and leading `~/` are supported.
+`EVOLVINGME_DATA_DIR` remains an absolute-path override. Unknown keys, empty
+values, malformed JSON and an explicitly selected missing config file fail
+rather than silently selecting another database. An explicit data-directory
+environment override bypasses file configuration. Keep database contents out of
+version control and do not put credentials in this configuration.
+
+Changing the setting selects a source; it does not copy, merge or migrate data.
+Do not move the existing database as part of configuration. Confirm authorization
+for a new destination under Guardails before using it. If the user independently
+chooses a synchronized folder, synchronization remains their deployment concern:
+close all connections and complete sync on both instances before a sequential
+handoff; never use concurrent writers across instances. SQLite transactions and
+local locks do not coordinate independent synced copies. Do not inspect client
+credentials or configure a sync provider to resolve a local data path.
+
+
 Use `<app-root>/data/evolvingme/` by default. Resolve installation symlinks
 first: when the real skill folder is `<app-root>/skills/evolvingme/`, app root
 is the parent of `skills/` (the distribution repository root), not the project
 the agent is currently working on. For this deployment the default is
 `/data/apps/lidaning-skills/data/evolvingme/`. For another installation layout,
 select an absolute `EVOLVINGME_DATA_DIR` explicitly rather than guessing a root.
-An explicitly selected absolute `EVOLVINGME_DATA_DIR` overrides the default;
+The configured data directory overrides the default;
 reject relative overrides. Use the same root across agents; project scope is
 recorded inside records, not inferred from the caller's cwd. Create directories
 only when needed. Never commit runtime records; ignore the selected data root.
@@ -188,3 +217,12 @@ remove affected source records,
 derived principles and exports within authorized scope, and reconcile rules
 propagated to other skills. Preserve no copy of forgotten content in an audit
 entry; report any destination that cannot be cleaned up.
+
+### Database-file path compatibility
+
+`data_dir` and `EVOLVINGME_DATA_DIR` also accept a SQLite filename ending in
+`.sqlite3`, `.sqlite`, or `.db`. An existing directory always remains a data
+directory, regardless of its suffix. For file paths, the database is opened
+at that exact path; domain notebooks and legacy imports use its parent directory.
+Relative config-file paths still resolve against the config file directory.
+This selects storage only; it never moves or merges existing data.

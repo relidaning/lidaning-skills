@@ -14,12 +14,43 @@ SKILL = Path(__file__).resolve().parents[1]
 APP = SKILL.parents[1]
 
 
-def root():
-    value = os.environ.get('EVOLVINGME_DATA_DIR')
-    path = Path(value) if value else APP / 'data/evolvingme'
+def configured_path():
+    # An explicit environment override keeps existing deployments compatible.
+    if 'EVOLVINGME_DATA_DIR' in os.environ:
+        value = os.environ['EVOLVINGME_DATA_DIR']
+        setting = 'EVOLVINGME_DATA_DIR'
+    else:
+        selected = os.environ.get('EVOLVINGME_CONFIG')
+        if selected is not None and (not selected or not Path(selected).is_absolute()):
+            raise ValueError('EVOLVINGME_CONFIG must be an absolute filename')
+        config = Path(selected) if selected else SKILL / 'scripts/config.json'
+        values = {}
+        if selected is not None or config.exists():
+            values = json.loads(config.read_text())
+            if not isinstance(values, dict) or set(values) - {'data_dir'}:
+                raise ValueError('EvolvingMe config must be an object containing only data_dir')
+        value = values.get('data_dir', str(APP / 'data/evolvingme'))
+        setting = 'data_dir'
+        if isinstance(value, str) and value and not Path(value).expanduser().is_absolute():
+            value = str((config.parent / value).resolve())
+    if not isinstance(value, str) or not value:
+        raise ValueError(f'{setting} must be a nonempty absolute path')
+    path = Path(value).expanduser()
     if not path.is_absolute():
-        raise ValueError('EVOLVINGME_DATA_DIR must be absolute')
+        raise ValueError(f'{setting} must be absolute')
     return path
+
+
+def database_path():
+    path = configured_path()
+    # Preserve existing directories, even when their names have SQLite suffixes.
+    if path.suffix.lower() in ('.sqlite3', '.sqlite', '.db') and not path.is_dir():
+        return path
+    return path / 'evolvingme.sqlite3'
+
+
+def root():
+    return database_path().parent
 
 
 def validate(record):
@@ -29,9 +60,9 @@ def validate(record):
 
 
 def connect():
-    directory = root()
-    directory.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(directory / 'evolvingme.sqlite3', timeout=30)
+    path = database_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path, timeout=30)
     db.execute('PRAGMA synchronous=FULL')
     db.execute('PRAGMA secure_delete=ON')
     db.executescript('''
