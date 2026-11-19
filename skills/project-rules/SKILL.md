@@ -1,7 +1,9 @@
 ---
 name: project-rules
 description: >
-  Apply the user's project engineering rules whenever creating, editing,
+  Build an evidence-based understanding of project purpose, architecture, runtime
+  behavior and change impact. Apply the user's engineering rules when explaining,
+  onboarding to, creating, editing,
   reviewing, optimizing, or configuring a project with executable scripts,
   services, build commands, or automation. Reorganize existing files during
   project-wide optimization, keep project directories coherent, centralize
@@ -32,6 +34,14 @@ Respect explicit user instructions and project-specific constraints.
 
 ## Understand before changing
 
+Treat project understanding as a working model that explains observable behavior,
+not a directory summary. For onboarding, project explanations, unfamiliar or
+cross-component work, read [project understanding](references/understanding.md).
+For a small familiar change, use the same evidence and readiness criteria on the
+affected path without producing a full project report. Understanding-only work
+is read-only; it does not trigger layout, configuration or observability changes.
+
+
 - Start with project guidance, manifests, the directory tree and documented
   entrypoints. Form a small working map of affected components, dependencies,
   data ownership and execution flow; verify it against actual code. Distinguish
@@ -45,6 +55,9 @@ Respect explicit user instructions and project-specific constraints.
   change, the owning module and affected consumers. For architectural or
   structural work, read [architecture guidance](references/architecture.md)
   and use it to organize the implementation, not merely write a design report.
+  Assess reusable logic, interface boundaries and dependency injection in the
+  affected area. During optimization or refactoring, implement justified
+  extractions within scope; in explanation or review mode, describe opportunities.
 - For project-wide optimization, also read
   [runtime efficiency and recovery](references/runtime.md). Inspect applicable
   performance, memory, concurrency and recovery paths; prioritize measured

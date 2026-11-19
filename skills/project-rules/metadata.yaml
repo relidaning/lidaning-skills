@@ -1,4 +1,4 @@
 name: project-rules
-description: Understand architecture, organize reusable logic and interfaces, analyze runtime efficiency and recovery, and maintain portable project configuration.
+description: Understand project purpose, trace execution and data flow, verify architecture and change impact, and apply portable engineering rules.
 scope: global
-tags: [project, rules, organization, configuration, portability, architecture, performance, recovery]
+tags: [project, rules, organization, configuration, portability, understanding, architecture, performance, recovery]
