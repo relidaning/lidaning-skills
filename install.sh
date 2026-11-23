@@ -29,6 +29,28 @@ log()  { echo -e "${GREEN}[install]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()  { echo -e "${RED}[error]${NC} $*"; }
 
+install_cli() {
+  local bin_dir="$HOME/.local/bin"
+  local launcher="$bin_dir/ldn"
+  local source="$SKILLS_DIR/bin/ldn"
+
+  mkdir -p "$bin_dir" || return 1
+  if [[ -L "$launcher" && "$launcher" -ef "$source" ]]; then
+    log "ldn is already installed at $launcher"
+  elif [[ -e "$launcher" || -L "$launcher" ]]; then
+    err "$launcher already exists. Move it aside before installing ldn." >&2
+    return 1
+  else
+    ln -sT -- "$source" "$launcher" || return 1
+    log "Installed ldn at $launcher"
+  fi
+
+  if [[ ":${PATH:-}:" != *":$bin_dir:"* ]]; then
+    warn 'Add ~/.local/bin to PATH to run ldn by name.'
+    printf '%s\n' 'For Bash or Zsh, run: export PATH="$HOME/.local/bin:$PATH"'
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [--list] [--installed]
@@ -42,6 +64,7 @@ Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [-
   --remove      Uninstall the skill
   --list        List all available skills
   --installed   Show install status of each skill (global/project)
+  --install-cli Only install ldn in ~/.local/bin (also installed by default with skills)
 
 Examples:
   install.sh english-practice --global
@@ -409,6 +432,11 @@ remove_skill() {
 
 # --- main ---
 
+if [[ $# -eq 0 || ( $# -eq 1 && "$1" == "--install-cli" ) ]]; then
+  install_cli
+  exit 0
+fi
+
 SCOPE=""
 REMOVE=false
 MCP_ONLY=false
@@ -426,6 +454,7 @@ while [[ $# -gt 0 ]]; do
     --mcp-only) MCP_ONLY=true; shift ;;
     --list)     list_skills; exit 0 ;;
     --installed) list_installed; exit 0 ;;
+    --install-cli) err "--install-cli must be used on its own." >&2; exit 1 ;;
     -h|--help)  usage ;;
     *)          SKILLS+=("$1"); shift ;;
   esac
@@ -446,3 +475,7 @@ for agent in $AGENTS; do
     fi
   done
 done
+
+if ! $REMOVE && ! $MCP_ONLY; then
+  install_cli || warn "Skills were installed, but ldn setup failed."
+fi

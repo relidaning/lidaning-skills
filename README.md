@@ -23,9 +23,8 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 ## Quick start
 
 ```bash
-# Make the repo's command available on PATH (once per checkout)
-mkdir -p ~/.local/bin
-ln -s "$PWD/bin/ldn" ~/.local/bin/ldn
+# Set up the user-local command
+./install.sh
 
 # Interactive checkbox UI — toggle skills on/off (requires gum)
 # Press x or Tab to toggle, Enter to apply, Esc to cancel.
@@ -62,6 +61,13 @@ ldn list -agent opencode                                 # (no -agent = Claude C
 ```
 
 ## How it works
+
+`install.sh` sets up `ldn` automatically when installing skills. Run
+`./install.sh` or `./install.sh --install-cli` to set up just the command.
+`ldn` is linked from `~/.local/bin` to this checkout. Keep the checkout in
+place and include `~/.local/bin` in your shell's `PATH` to run it from any
+directory. If your shell does not already include it, add
+`export PATH="$HOME/.local/bin:$PATH"` to your Bash or Zsh startup file.
 
 `install.sh`, `ldn`, and the Node CLI use the same installer. They link the
 complete skill folder, including scripts, references, assets, and metadata.

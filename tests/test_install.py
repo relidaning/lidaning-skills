@@ -49,6 +49,29 @@ class InstallTests(unittest.TestCase):
     def read_config(self, path=None):
         return tomllib.loads((path or self.project / ".codex/config.toml").read_text())
 
+    def test_user_local_cli_from_another_directory(self):
+        self.run_cli(["english-practice", "--global"])
+        self.assertTrue((self.home / ".local/bin/ldn").is_symlink())
+        self.run_cli([])
+        self.run_cli(["--install-cli"])
+        bin_dir = self.home / ".local/bin"
+        self.assertEqual((bin_dir / "ldn").resolve(), REPO / "bin/ldn")
+        env = dict(self.env, PATH=f"{bin_dir}{os.pathsep}{self.env['PATH']}")
+        result = subprocess.run(
+            ["ldn", "add", "english-practice", "--agent", "codex"],
+            cwd=self.project, env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.project / ".agents/skills/english-practice").is_symlink())
+
+    def test_install_cli_preserves_existing_command(self):
+        launcher = self.home / ".local/bin/ldn"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("existing command")
+        self.run_cli(["--install-cli"], ok=False)
+        self.run_cli(["english-practice", "--project"])
+        self.assertEqual(launcher.read_text(), "existing command")
+
     def test_codex_complete_package_reinstall_remove(self):
         args = ["learning-instruct", "--project", "--codex"]
         target = self.project / ".agents/skills/learning-instruct"
