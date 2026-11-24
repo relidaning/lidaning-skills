@@ -24,6 +24,19 @@ put other runtime overrides in `.env` or TOML. A separate `--env-file` changes
 Compose interpolation only; the service still reads its sibling `.env`.
 Do not commit `.env`, model downloads, database data or logs.
 
+### Chroma database location
+
+Set `CHROMA_DATA_DIR` in the sibling `.env` to the parent directory of
+`chroma.sqlite3`. For example, to use `/srv/rag/chroma/chroma.sqlite3`, set
+`CHROMA_DATA_DIR=/srv/rag/chroma`. Chroma needs the whole directory because
+it stores vector indexes alongside SQLite. The default database is
+`./data/chroma/chroma.sqlite3`, relative to the Compose file.
+
+Run `docker compose -f skills/rag-chroma/docker-compose.yml up -d --no-build`
+from the repository root to apply the mount with the existing images. Verify
+the vault source before switching to an existing database, since the RAG
+watcher reconciles indexed notes with the contents of that vault.
+
 | Role | Current implementation / source of truth | Replacement contract |
 |---|---|---|
 | Runtime | Python image in Compose/Dockerfile; dependencies in `rag-mcp/requirements.txt` | Python 3.12+; rebuild image after dependency changes. Dependency ranges remain ranges, not a lockfile. |

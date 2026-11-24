@@ -52,6 +52,8 @@ def load_config(path=None, environ=None):
     for key in ("RAG_PORT", "CHROMA_PORT"):
         if values[key] > 65535:
             raise ValueError(f"Invalid {key}: must be <= 65535")
+    if values["CHUNK_PAGE_SIZE"] > 100:
+        raise ValueError("CHUNK_PAGE_SIZE must be <= 100")
     if values["CHUNK_TOKENS"] > values["EMBED_MAX_TOKENS"]:
         raise ValueError("CHUNK_TOKENS must be <= EMBED_MAX_TOKENS")
     for key in ("RAG_LOG_DIR", "EMBED_MODEL_DIR"):

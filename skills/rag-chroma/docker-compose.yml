@@ -2,7 +2,9 @@ services:
   chromadb:
     image: ${CHROMA_IMAGE:-chromadb/chroma:0.6.3}
     volumes:
-      - ${CHROMA_DATA_DIR:-./data/chroma}:/chroma/chroma
+      - type: bind
+        source: "${CHROMA_DATA_DIR:-./data/chroma}"
+        target: /chroma/chroma
     ports:
       - "${CHROMA_PUBLISH_PORT:-8000}:8000"
     healthcheck:

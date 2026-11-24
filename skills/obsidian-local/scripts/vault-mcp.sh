@@ -9,6 +9,9 @@ set -euo pipefail
 SERVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../server" && pwd)"
 PORT="${OBSIDIAN_VAULT_MCP_PORT:-27125}"
 BASE="http://127.0.0.1:$PORT"
+if [[ -z "${OBSIDIAN_VAULT_PATH:-}" && -f "$SERVER_DIR/.env" ]]; then
+  OBSIDIAN_VAULT_PATH="$(docker compose --env-file "$SERVER_DIR/.env" -f "$SERVER_DIR/docker-compose.yml" config --environment | sed -n 's/^OBSIDIAN_VAULT_PATH=//p')"
+fi
 export OBSIDIAN_VAULT_PATH="${OBSIDIAN_VAULT_PATH:-/data/nextcloud_client/obsidian/lidaning}"
 export VAULT_UID="$(stat -c %u "$OBSIDIAN_VAULT_PATH")" VAULT_GID="$(stat -c %g "$OBSIDIAN_VAULT_PATH")"
 

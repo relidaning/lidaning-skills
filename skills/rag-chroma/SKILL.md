@@ -66,7 +66,7 @@ Obsidian app, REST API or token is needed. `rag_answer` additionally requires `L
 | `rag_remove(doc_id, collection?)` | Remove a single chunk by ID |
 | `rag_clear()` | Wipe the vault index (irreversible) |
 | `rag_sources(collection?, prefix?)` | List indexed source paths and chunk counts. |
-| `rag_chunks(collection?, source?, offset?, limit?, doc_id?)` | Browse complete chunk text and metadata; pages up to 100 chunks. |
+| `rag_chunks(collection?, source?, offset?, limit?, doc_id?)` | Browse complete chunk text and metadata; defaults to 10 chunks per page (configurable via `CHUNK_PAGE_SIZE`), with a maximum of 100. |
 | `rag_logs(date?, limit?)` | Read daily audit events, newest first; date is `YYYY-MM-DD`. |
 
 `collection` defaults to `documents`, the vault index. Other collections hold

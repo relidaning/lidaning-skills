@@ -1,12 +1,12 @@
 const $ = id => document.getElementById(id);
-let status, tools = [], offset = 0, source = '', busy = 0;
+let status, tools = [], offset = 0, chunkPageSize, source = '', busy = 0;
 const examples = {
   rag_search: {query: 'retrieval augmented generation', k: 5, mode: 'hybrid'},
   rag_answer: {query: 'How does retrieval work?', k: 4},
   rag_load: {prefix: '0_dev/0_AI'}, rag_status: {},
   rag_ingest: {collection: 'scratch', documents: [{id: 'example', content: 'Your text here', metadata: {source: 'manual'}}]},
   rag_list: {collection: 'papers', limit: 30}, rag_remove: {doc_id: 'example', collection: 'scratch'},
-  rag_clear: {}, rag_chunks: {source: '', limit: 30}, rag_sources: {prefix: '0_dev/0_AI/'}, rag_logs: {limit: 100}
+  rag_clear: {}, rag_chunks: {source: ''}, rag_sources: {prefix: '0_dev/0_AI/'}, rag_logs: {limit: 100}
 };
 function notice(message) { $('notice').textContent = message; $('notice').hidden = !message; }
 async function call(tool, args = {}, confirm = '') {
@@ -68,7 +68,8 @@ async function loadSources() {
   }
 }
 async function loadChunks() {
-  const result = await call('rag_chunks', {collection: $('browse-collection').value, source, offset, limit: 30});
+  const result = await call('rag_chunks', {collection: $('browse-collection').value, source, offset});
+  chunkPageSize = result.limit;
   $('selected-source').textContent = source || 'All chunks';
   passages($('chunks'), result.items); $('page').textContent = result.count ? `${offset + 1}–${offset + result.count}` : 'No chunks';
   $('previous').hidden = offset === 0; $('next').hidden = !result.has_more;
@@ -100,8 +101,8 @@ $('refresh').onclick = () => run(refresh);
 $('sources-refresh').onclick = () => run(loadSources);
 $('source-filter').onkeydown = e => {if (e.key === 'Enter') run(loadSources);};
 $('browse-collection').onchange = () => run(async () => {source = ''; offset = 0; await loadSources(); await loadChunks();});
-$('previous').onclick = () => run(async () => {offset = Math.max(0, offset - 30); await loadChunks();});
-$('next').onclick = () => run(async () => {offset += 30; await loadChunks();});
+$('previous').onclick = () => run(async () => {offset = Math.max(0, offset - chunkPageSize); await loadChunks();});
+$('next').onclick = () => run(async () => {offset += chunkPageSize; await loadChunks();});
 $('logs-refresh').onclick = () => run(logs);
 $('tool').onchange = selectTool;
 $('tool-form').onsubmit = e => { e.preventDefault(); run(async () => {

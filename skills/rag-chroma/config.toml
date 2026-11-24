@@ -23,5 +23,6 @@ EMBED_THREADS = 8
 EMBED_BATCH = 4
 EMBED_MAX_TOKENS = 512
 CHUNK_TOKENS = 300 # complete context header included; <= EMBED_MAX_TOKENS
+CHUNK_PAGE_SIZE = 10 # default for chunk browsing; maximum 100
 RRF_K = 60
 EXACT_KEYWORD_WEIGHT = 2.0

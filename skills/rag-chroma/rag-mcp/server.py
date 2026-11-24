@@ -625,7 +625,7 @@ async def rag_sources(collection: str = COLLECTION_NAME, prefix: str = "") -> di
 @mcp.tool()
 @audited
 async def rag_chunks(collection: str = COLLECTION_NAME, source: str = "",
-                     offset: int = 0, limit: int = 30, doc_id: str = "") -> dict:
+                     offset: int = 0, limit: int = CONFIG["CHUNK_PAGE_SIZE"], doc_id: str = "") -> dict:
     """Browse complete stored chunks and their metadata with pagination."""
     if not 0 <= offset or not 1 <= limit <= 100:
         raise ValueError("offset must be nonnegative; limit must be 1–100")
@@ -639,7 +639,8 @@ async def rag_chunks(collection: str = COLLECTION_NAME, source: str = "",
     items = [{"id": i, "metadata": m or {}, "text": d}
              for i, m, d in zip(got["ids"], got["metadatas"], got["documents"])]
     items.sort(key=lambda i: (i["metadata"].get("source", ""), i["metadata"].get("chunk", 0)))
-    return {"items": items, "count": len(items), "offset": offset, "has_more": len(items) == limit}
+    return {"items": items, "count": len(items), "offset": offset, "limit": limit,
+            "has_more": len(items) == limit}
 
 
 @mcp.tool()

@@ -37,6 +37,10 @@ Two MCP servers, one skill:
 Helper script: `/data/apps/lidaning-skills/skills/obsidian-local/scripts/vault-mcp.sh`
 (referred to below as `vault-mcp.sh`).
 
+To use a different local vault, set `OBSIDIAN_VAULT_PATH` in `server/.env`
+and run `docker compose --env-file server/.env -f server/docker-compose.yml up -d`
+from the skill directory to apply the new mount.
+
 ## Step 0 — ensure the server is up (every time the skill triggers)
 
 Before any vault operation, run:
