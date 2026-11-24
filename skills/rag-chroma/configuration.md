@@ -46,6 +46,7 @@ watcher reconciles indexed notes with the contents of that vault.
 | Vault source | MCP over HTTP; `VAULT_MCP_URL`, `VAULT_MCP_TIMEOUT`, `WATCH_INTERVAL` | `list_directory`, `get_notes_info`, `read_multiple_notes` response contracts in `vault_client.py`. Another API requires an adapter. |
 | Retrieval | BM25 + cosine RRF; `RRF_K`, `EXACT_KEYWORD_WEIGHT`, `CHUNK_TOKENS` | Changing chunk budget affects new/reloaded notes. No-overlap policy, model pooling and protocol/API bounds remain code invariants. |
 | Transport/UI | FastMCP + Starlette, vanilla JS; `RAG_HOST`, `RAG_PORT`, `RAG_MCP_URL` | Keep the client URL and installed agent MCP registrations (`mcp.json` template) aligned with the server port. Healthcheck reads the same configured port. |
+| Formula rendering | KaTeX version and checksum pinned in `rag-mcp/Dockerfile` | Rebuild to update the bundled assets. The inspector uses browser-native MathML and serves the renderer from the same origin. |
 | Persistence | Compose host bind mounts; `CHROMA_DATA_DIR`, `RAG_LOG_HOST_DIR` | Preserve existing data; changing a path does not move it. Back up and migrate explicitly. |
 
 The default deployment uses Linux host networking for rag-mcp and a published

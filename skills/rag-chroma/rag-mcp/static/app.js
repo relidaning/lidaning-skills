@@ -22,6 +22,20 @@ async function run(action) {
   finally { if (!--busy) document.querySelectorAll('button[type=submit], #answer').forEach(b => b.disabled = false); }
 }
 function element(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+function renderPassage(container, text) {
+  container.textContent = text;
+  window.renderMathInElement?.(container, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '\\[', right: '\\]', display: true},
+      {left: '\\(', right: '\\)', display: false},
+      {left: '$', right: '$', display: false}
+    ],
+    output: 'mathml',
+    trust: false,
+    errorCallback: () => {}
+  });
+}
 function passages(container, items) {
   container.replaceChildren();
   if (!items.length) { container.append(element('p', 'No chunks found. Try another query, collection, or source.', 'empty')); return; }
@@ -30,7 +44,9 @@ function passages(container, items) {
     card.append(element('h3', m.heading || m.source || item.source || item.id));
     const meta = element('div', undefined, 'metadata');
     for (const value of [m.source, item.score !== undefined ? `Similarity ${item.score}` : '', item.match ? `Matched by ${item.match}` : '', m.chunk !== undefined ? `Chunk ${m.chunk + 1}` : '', m.tokens ? `${m.tokens} tokens` : '', m.split_reason ? `Split: ${m.split_reason}` : '', m.chunker || '']) if (value) meta.append(element('span', value));
-    card.append(meta, element('pre', item.text || item.snippet || ''), element('span', item.id, 'chunk-id'));
+    const content = element('div', undefined, 'passage-text');
+    renderPassage(content, item.text || item.snippet || '');
+    card.append(meta, content, element('span', item.id, 'chunk-id'));
     container.append(card);
   }
 }
@@ -53,7 +69,8 @@ async function retrieve(answer = false) {
   if (answer && $('search-collection').value !== 'documents') throw new Error('Generated answers currently use the documents collection.');
   const result = await call(answer ? 'rag_answer' : 'rag_search', answer ? {query, k: +$('k').value} : {query, k: +$('k').value, mode: $('mode').value, collection: $('search-collection').value});
   const items = result.results || result.chunks || [];
-  $('answer-result').hidden = !answer; $('answer-result').textContent = result.answer || '';
+  $('answer-result').hidden = !answer;
+  renderPassage($('answer-result'), result.answer || '');
   passages($('results'), items); $('result-count').textContent = `${items.length} chunks`;
 }
 async function loadSources() {

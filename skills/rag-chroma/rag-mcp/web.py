@@ -21,6 +21,14 @@ def register_web(mcp):
     async def javascript(request):
         return FileResponse(STATIC / "app.js", media_type="text/javascript")
 
+    @mcp.custom_route("/katex.min.js", methods=["GET"])
+    async def katex(request):
+        return FileResponse(STATIC / "katex.min.js", media_type="text/javascript")
+
+    @mcp.custom_route("/contrib/auto-render.min.js", methods=["GET"])
+    async def katex_auto_render(request):
+        return FileResponse(STATIC / "contrib" / "auto-render.min.js", media_type="text/javascript")
+
     @mcp.custom_route("/style.css", methods=["GET"])
     async def stylesheet(request):
         return FileResponse(STATIC / "style.css", media_type="text/css")

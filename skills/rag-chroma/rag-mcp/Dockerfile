@@ -24,6 +24,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config.toml /config.toml
 COPY rag-mcp/*.py ./
 COPY rag-mcp/static ./static
+# Bundle KaTeX for offline use under the inspector's same-origin CSP.
+RUN curl -fsSL --retry 3 -o /tmp/katex.tgz https://registry.npmjs.org/katex/-/katex-0.19.1.tgz && \
+    echo "24da5a599eb2fcede2e270b99a6ff48bca816beecc95feeb84e8cccbd1bb34fd  /tmp/katex.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/katex.tgz -C static --strip-components=2 package/dist/katex.min.js package/dist/contrib/auto-render.min.js && \
+    tar -xOf /tmp/katex.tgz package/LICENSE > static/katex.LICENSE && rm /tmp/katex.tgz
+
 ENV RAG_LOG_DIR=/skill/logs
 
 EXPOSE 8081
