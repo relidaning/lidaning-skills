@@ -60,7 +60,8 @@ Usage: install.sh <skill-name...> [--global|--project] [--agent A] [--remove] [-
   --agent A     claude (default), codex, both (Claude + Codex), opencode, or all; also settable via LDN_AGENT
   --codex       Shorthand for --agent codex
   --opencode    Shorthand for --agent opencode
-  --mcp-only    Only register the skills' MCP servers (used by ldn mcp inject)
+  --mcp-only    Only change MCP registrations (deregister with --remove)
+  --no-mcp      Only change skill links, leaving MCP registrations alone
   --remove      Uninstall the skill
   --list        List all available skills
   --installed   Show install status of each skill (global/project)
@@ -374,8 +375,6 @@ install_skill() {
   fi
 
   local scope="${scope_override:-$(skill_scope "$skill_dir")}"
-  local install_dir=$(skills_root "$agent" "$scope")
-
   # --mcp-only (used by ldn mcp inject): register MCP servers, link nothing
   if $MCP_ONLY; then
     if [[ -f "$skill_dir/mcp.json" ]]; then
@@ -384,6 +383,8 @@ install_skill() {
     fi
     return 0
   fi
+
+  local install_dir=$(skills_root "$agent" "$scope")
 
   # Link the entire package so relative scripts, references and assets work.
   local link_dir="$install_dir/${name}"
@@ -394,7 +395,7 @@ install_skill() {
   log "Linked $name -> $link_dir/ [$agent]"
 
   # Register MCP server if skill ships one
-  if [[ -f "$skill_dir/mcp.json" ]]; then
+  if ! $NO_MCP && [[ -f "$skill_dir/mcp.json" ]]; then
     agent_mcp add "$agent" "$skill_dir/mcp.json" "$scope"
     log "Registered MCP server(s) from $name [$agent]"
   fi
@@ -410,21 +411,23 @@ remove_skill() {
 
   local scope="${2:-$(skill_scope "$skill_dir")}"
   local agent="$3"
-  local install_dir=$(skills_root "$agent" "$scope")
+  if ! $MCP_ONLY; then
+    local install_dir=$(skills_root "$agent" "$scope")
 
-  local link_dir="$install_dir/${name}"
-  if [[ -L "$link_dir" ]]; then
-    rm "$link_dir"
-    log "Removed $link_dir"
-  elif [[ -d "$link_dir" ]]; then
-    rm -rf "$link_dir"
-    log "Removed $link_dir"
-  else
-    warn "Not installed: $link_dir"
+    local link_dir="$install_dir/${name}"
+    if [[ -L "$link_dir" ]]; then
+      rm "$link_dir"
+      log "Removed $link_dir"
+    elif [[ -d "$link_dir" ]]; then
+      rm -rf "$link_dir"
+      log "Removed $link_dir"
+    else
+      warn "Not installed: $link_dir"
+    fi
   fi
 
   # Deregister MCP server if skill ships one
-  if [[ -f "$skill_dir/mcp.json" ]]; then
+  if ! $NO_MCP && [[ -f "$skill_dir/mcp.json" ]]; then
     agent_mcp remove "$agent" "$skill_dir/mcp.json" "$scope"
     log "Removed MCP server(s) from $name [$agent]"
   fi
@@ -440,6 +443,7 @@ fi
 SCOPE=""
 REMOVE=false
 MCP_ONLY=false
+NO_MCP=false
 SKILLS=()
 
 while [[ $# -gt 0 ]]; do
@@ -452,6 +456,7 @@ while [[ $# -gt 0 ]]; do
     --codex)    AGENT="codex"; shift ;;
     --opencode) AGENT="opencode"; shift ;;
     --mcp-only) MCP_ONLY=true; shift ;;
+    --no-mcp)   NO_MCP=true; shift ;;
     --list)     list_skills; exit 0 ;;
     --installed) list_installed; exit 0 ;;
     --install-cli) err "--install-cli must be used on its own." >&2; exit 1 ;;
@@ -462,6 +467,11 @@ done
 
 if [[ ${#SKILLS[@]} -eq 0 ]]; then
   usage
+fi
+
+if $MCP_ONLY && $NO_MCP; then
+  err "--mcp-only and --no-mcp cannot be combined." >&2
+  exit 1
 fi
 
 AGENTS=$(agents) || exit 1

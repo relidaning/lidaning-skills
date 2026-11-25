@@ -68,25 +68,6 @@ is_installed() {
   done
 }
 
-mcp_config() {
-  local agent="$1" config
-  if [[ "$SCOPE" == "global" ]]; then
-    case "$agent" in
-      claude) config="$HOME/.claude/settings.json" ;;
-      codex) config="${CODEX_HOME:-$HOME/.codex}/config.toml" ;;
-      opencode) config="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json" ;;
-    esac
-  else
-    case "$agent" in
-      claude) config="$PWD/.mcp.json" ;;
-      codex) config="$PWD/.codex/config.toml" ;;
-      opencode) config="$PWD/opencode.json" ;;
-    esac
-  fi
-  if [[ "$agent" == "opencode" && -f "${config}c" ]]; then config="${config}c"; fi
-  printf '%s' "$config"
-}
-
 # ---------------------------------------------------------------------------
 # List (plaintext)
 # ---------------------------------------------------------------------------
@@ -133,8 +114,19 @@ cmd_mcp_inject() {
 }
 
 # ---------------------------------------------------------------------------
-# Interactive manage: unified add/remove via single checkbox UI
+# Interactive setup
 # ---------------------------------------------------------------------------
+
+choose_many() {
+  local header="$1"
+  shift
+  gum choose --no-limit --header="$header  (x/tab=toggle  enter=confirm  esc=cancel)" \
+    --cursor-prefix="[ ] " --selected-prefix="[x] " --unselected-prefix="[ ] " "$@"
+}
+
+cancelled() {
+  printf 'Cancelled. No changes made.\n'
+}
 
 cmd_manage() {
   if [[ ! -t 0 || ! -t 1 ]]; then
@@ -148,88 +140,84 @@ cmd_manage() {
     printf "${YELLOW}gum not found — falling back to plain list.${NC}\n"
     printf "Install gum: https://github.com/charmbracelet/gum\n\n"
     cmd_list
-    exit 0
+    return 0
   fi
 
-  local all_skills=()
-  local was_installed=()
-  local config_agent="$AGENT"
-  [[ "$AGENT" == "both" || "$AGENT" == "all" ]] && config_agent="claude"
-  local mcp_file
-  mcp_file=$(mcp_config "$config_agent")
-  local MCP_ITEM="⟶ inject MCP servers into $mcp_file"
-  if [[ "$AGENT" == "both" || "$AGENT" == "all" ]]; then
-    MCP_ITEM+=" + $(mcp_config codex)"
-    [[ "$AGENT" == "all" ]] && MCP_ITEM+=" + $(mcp_config opencode)"
+  if ! $SCOPE_SET; then
+    SCOPE=$(gum choose --header="Installation scope ($PWD)" project global) || { cancelled; return; }
+  fi
+  if ! $AGENT_SET; then
+    AGENT=$(gum choose --header="Agent (both = Claude Code + Codex; all includes OpenCode)" \
+      claude codex opencode both all) || { cancelled; return; }
   fi
 
-  local gum_args=(
-    choose --no-limit
-    # gum 2.x does not recognize Space reliably; x and Tab work across versions.
-    --header="[$AGENT, $SCOPE] Toggle skills / MCP injection  (x/tab=toggle  enter=confirm  esc=cancel)"
-    --cursor-prefix="[ ] "
-    --selected-prefix="[x] "
-    --unselected-prefix="[ ] "
-    --cursor.foreground="#06B6D4"
-    --selected.foreground="#06B6D4"
-    --header.foreground="#06B6D4"
-  )
-
-  [[ -f "$mcp_file" ]] && gum_args+=(--selected="$MCP_ITEM")
-
-  while IFS= read -r name; do
-    all_skills+=("$name")
-    if is_installed "$name"; then
-      was_installed+=("$name")
-      gum_args+=(--selected="$name")
-    fi
-  done < <(skill_names)
+  local all_skills=() selected_flags=() mcp_skills=()
+  mapfile -t all_skills < <(skill_names)
+  mapfile -t mcp_skills < <(skills_with_mcp)
 
   if [[ ${#all_skills[@]} -eq 0 ]]; then
-    printf "No skills found in registry.\n"
-    exit 1
+    printf 'No skills found in registry.\n' >&2
+    return 1
   fi
+
+  local name
+  local -A installed=() selected=()
+  for name in "${all_skills[@]}"; do
+    if is_installed "$name"; then
+      installed["$name"]=1
+      selected_flags+=(--selected="$name")
+    fi
+  done
 
   local chosen
-  chosen=$(printf '%s\n' "${all_skills[@]}" "$MCP_ITEM" | gum "${gum_args[@]}") || {
-    printf "Cancelled.\n"
-    exit 0
-  }
-
-  # Build lookup of chosen skills
-  declare -A chosen_set=()
+  chosen=$(choose_many "[$AGENT, $SCOPE] Skills to keep or install" \
+    "${selected_flags[@]}" -- "${all_skills[@]}") || { cancelled; return; }
   while IFS= read -r name; do
-    [[ -n "$name" ]] && chosen_set["$name"]=1
+    [[ -n "$name" ]] && selected["$name"]=1
   done <<<"$chosen"
 
-  local did_something=false
-
-  # Install newly selected skills into the selected scope.
-  for name in "${all_skills[@]}"; do
-    if [[ -n "${chosen_set[$name]:-}" ]] && ! is_installed "$name"; then
-      printf "${CYAN}[add]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" "$name" "--$SCOPE" --agent "$AGENT"
-      did_something=true
+  local mcp_action=keep mcp_selected=()
+  if [[ ${#mcp_skills[@]} -gt 0 ]]; then
+    mcp_action=$(gum choose --header="[$AGENT, $SCOPE] MCP servers" keep register deregister) || {
+      cancelled
+      return
+    }
+    if [[ "$mcp_action" != keep ]]; then
+      chosen=$(choose_many "Choose skills whose MCP servers to $mcp_action" -- "${mcp_skills[@]}") || {
+        cancelled
+        return
+      }
+      if [[ -n "$chosen" ]]; then
+        mapfile -t mcp_selected <<<"$chosen"
+      fi
     fi
-  done
-
-  # Remove newly deselected skills from the selected scope.
-  for name in "${was_installed[@]}"; do
-    if [[ -z "${chosen_set[$name]:-}" ]]; then
-      printf "${YELLOW}[rm]${NC} %s\n" "$name"
-      "$SKILLS_DIR/install.sh" --remove "$name" "--$SCOPE" --agent "$AGENT"
-      did_something=true
-    fi
-  done
-
-  # Inject MCP configs into the selected scope if that item was selected
-  if [[ -n "${chosen_set[$MCP_ITEM]:-}" ]]; then
-    cmd_mcp_inject
-    did_something=true
   fi
 
-  $did_something || printf "No changes.\n"
-  echo ""
+  local add=() remove=() target=("--$SCOPE" --agent "$AGENT")
+  for name in "${all_skills[@]}"; do
+    if [[ -n "${selected[$name]:-}" && -z "${installed[$name]:-}" ]]; then
+      add+=("$name")
+    elif [[ -z "${selected[$name]:-}" && -n "${installed[$name]:-}" ]]; then
+      remove+=("$name")
+    fi
+  done
+
+  if [[ ${#add[@]} -gt 0 ]]; then
+    "$SKILLS_DIR/install.sh" "${add[@]}" "${target[@]}" --no-mcp
+  fi
+  if [[ ${#remove[@]} -gt 0 ]]; then
+    "$SKILLS_DIR/install.sh" "${remove[@]}" "${target[@]}" --no-mcp --remove
+  fi
+  if [[ ${#mcp_selected[@]} -gt 0 ]]; then
+    local mcp_flags=(--mcp-only)
+    [[ "$mcp_action" == deregister ]] && mcp_flags+=(--remove)
+    "$SKILLS_DIR/install.sh" "${mcp_selected[@]}" "${target[@]}" "${mcp_flags[@]}"
+  fi
+
+  if [[ ${#add[@]} -eq 0 && ${#remove[@]} -eq 0 && ${#mcp_selected[@]} -eq 0 ]]; then
+    printf 'No changes.\n'
+  fi
+  printf '\n'
   cmd_list
 }
 
@@ -239,13 +227,13 @@ cmd_manage() {
 
 usage() {
   printf "${CYAN}ldn${NC} — lidaning-skills manager\n\n"
-  printf "  ${CYAN}ldn${NC}          Toggle skills on/off (checkbox UI)\n"
+  printf "  ${CYAN}ldn${NC}          Choose scope, agent, skills, and MCP servers (requires gum)\n"
   printf "  ${CYAN}ldn list${NC}     Plain-text list with install status\n"
   printf '  ldn add <name...>     Install skills without the checkbox UI\n'
   printf '  ldn remove <name...>  Remove skills without the checkbox UI\n'
   printf "  ${CYAN}ldn mcp inject${NC} Write skill MCP servers into the selected scope\n\n"
   printf "  --global / -g   Manage skills for all projects (current user)\n"
-  printf "  --project / -p  Manage skills in cwd (default)\n\n"
+  printf "  --project / -p  Manage skills in cwd (default for explicit commands)\n\n"
   printf "  ${CYAN}-agent <claude|codex|both|opencode|all>${NC}  Agent to manage skills for (default: claude)\n"
   printf "      claude    .claude/skills/, .mcp.json\n"
   printf "      codex     .agents/skills/, .codex/config.toml\n"
@@ -257,15 +245,17 @@ usage() {
 # Agent and scope options may appear anywhere; everything else is the command.
 AGENT="claude"
 SCOPE="project"
+AGENT_SET=false
+SCOPE_SET=false
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --global | -g) SCOPE="global"; shift ;;
-  --project | -p) SCOPE="project"; shift ;;
+  --global | -g) SCOPE="global"; SCOPE_SET=true; shift ;;
+  --project | -p) SCOPE="project"; SCOPE_SET=true; shift ;;
   -agent | --agent | -a)
     [[ $# -ge 2 ]] || { printf "ldn: %s needs claude, codex, both, opencode or all\n" "$1" >&2; exit 1; }
-    AGENT="$2"; shift 2 ;;
-  -agent=* | --agent=*) AGENT="${1#*=}"; shift ;;
+    AGENT="$2"; AGENT_SET=true; shift 2 ;;
+  -agent=* | --agent=*) AGENT="${1#*=}"; AGENT_SET=true; shift ;;
   *) ARGS+=("$1"); shift ;;
   esac
 done
@@ -273,8 +263,6 @@ case "$AGENT" in
 claude | codex | both | opencode | all) ;;
 *) printf "ldn: unknown agent '%s' (expected claude, codex, both, opencode or all)\n" "$AGENT" >&2; exit 1 ;;
 esac
-# install.sh reads the agent from LDN_AGENT
-export LDN_AGENT="$AGENT"
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 case "${1:-}" in

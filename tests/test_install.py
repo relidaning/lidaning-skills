@@ -168,24 +168,38 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(set(self.read_config()["mcp_servers"]), {"obsidian-vault", "rag"})
         self.assertFalse((self.project / ".mcp.json").exists())
 
-    def test_ldn_global_interactive_install_list_and_remove(self):
-        # Stub only the checkbox UI; exercise the real installer and preselection.
+    def guided_env(self, **choices):
+        # Stub the terminal menus only. Every change uses the real installer.
         tools = self.root / "bin"
         tools.mkdir()
         gum = tools / "gum"
         gum.write_text("#!/usr/bin/env python3\n"
                        "import json, os, sys\n"
                        "from pathlib import Path\n"
-                       "sys.stdin.read()\n"
-                       "Path(os.environ['GUM_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
-                       "print(os.environ['GUM_CHOICE'])\n")
+                       "header = next(a for a in sys.argv if a.startswith('--header='))\n"
+                       "with Path(os.environ['GUM_ARGS']).open('a') as log:\n"
+                       "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                       "for label, key in [('Installation scope', 'SCOPE'), ('Agent (', 'AGENT'),\n"
+                       "                   ('Skills to keep', 'SKILLS'), ('Choose skills', 'MCP'),\n"
+                       "                   ('MCP servers', 'ACTION')]:\n"
+                       "    if label in header:\n"
+                       "        value = os.environ['PICK_' + key]\n"
+                       "        if value == 'CANCEL': sys.exit(1)\n"
+                       "        print(value)\n"
+                       "        break\n"
+                       "else: sys.exit(2)\n")
         gum.chmod(0o755)
         env = dict(self.env, PATH=str(tools) + os.pathsep + self.env["PATH"],
-                   GUM_ARGS=str(self.root / "gum-args.json"), GUM_CHOICE="english-practice")
+                   GUM_ARGS=str(self.root / "gum-args.json"), PICK_ACTION="keep")
+        return dict(env, **choices)
+
+    def test_ldn_global_interactive_install_list_and_remove(self):
+        env = self.guided_env(PICK_SKILLS="english-practice")
         roots = {"claude": self.home / ".claude/skills",
                  "codex": self.home / ".agents/skills",
                  "opencode": self.home / "config/opencode/skills"}
-        for agent in ("claude", "codex", "opencode", "both", "all"):
+        for agent in (*roots, "both", "all"):
+            Path(env["GUM_ARGS"]).unlink(missing_ok=True)
             with self.subTest(agent=agent):
                 args = ["--global", "--agent", agent]
                 self.run_cli(args, entry="bin/ldn", env=env, terminal=True)
@@ -198,8 +212,10 @@ class InstallTests(unittest.TestCase):
                 project_output = self.run_cli(["list", "--project", "--agent", agent], entry="bin/ldn", env=env)
                 line = next(line for line in project_output.splitlines() if "english-practice" in line)
                 self.assertIn("[not installed]", line)
-                self.run_cli(args, entry="bin/ldn", env=dict(env, GUM_CHOICE=""), terminal=True)
-                gum_args = json.loads((self.root / "gum-args.json").read_text())
+                self.run_cli(args, entry="bin/ldn", env=dict(env, PICK_SKILLS=""), terminal=True)
+                prompts = [json.loads(line) for line in Path(env["GUM_ARGS"]).read_text().splitlines()]
+                gum_args = prompts[-2]
+                self.assertEqual(len(prompts), 4)
                 self.assertIn("--selected=english-practice", gum_args)
                 header = next(arg for arg in gum_args if arg.startswith("--header="))
                 self.assertIn("x/tab=toggle", header)
@@ -207,6 +223,33 @@ class InstallTests(unittest.TestCase):
                 for root in roots.values():
                     self.assertFalse((root / "english-practice").is_symlink())
                 self.assertEqual(list(self.project.iterdir()), [])
+
+    def test_bare_ldn_guides_scope_agent_skills_and_mcp(self):
+        env = self.guided_env(PICK_SCOPE="project", PICK_AGENT="codex",
+                              PICK_SKILLS="rag-chroma", PICK_MCP="obsidian-local")
+        self.run_cli([], entry="bin/ldn", env=dict(env, PICK_ACTION="register"), terminal=True)
+        prompts = [json.loads(line) for line in Path(env["GUM_ARGS"]).read_text().splitlines()]
+        headers = [next(arg for arg in prompt if arg.startswith("--header=")) for prompt in prompts]
+        for header, expected in zip(headers, ("Installation scope", "Agent", "Skills to keep",
+                                               "MCP servers", "Choose skills"), strict=True):
+            self.assertIn(expected, header)
+
+        skill = self.project / ".agents/skills/rag-chroma"
+        self.assertTrue(skill.is_symlink())
+        self.assertFalse((self.project / ".agents/skills/obsidian-local").exists())
+        self.assertFalse((self.project / ".claude").exists())
+        self.assertEqual(set(self.read_config()["mcp_servers"]), {"obsidian-vault"})
+
+        self.run_cli([], entry="bin/ldn", env=dict(env, PICK_ACTION="deregister"), terminal=True)
+        self.assertTrue(skill.is_symlink())
+        self.assertNotIn("obsidian-vault", self.read_config().get("mcp_servers", {}))
+
+    def test_ldn_cancels_before_applying_skill_changes(self):
+        env = self.guided_env(PICK_SCOPE="global", PICK_AGENT="all",
+                              PICK_SKILLS="rag-chroma", PICK_MCP="CANCEL")
+        self.run_cli([], entry="bin/ldn", env=dict(env, PICK_ACTION="register"), terminal=True)
+        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertEqual(list(self.project.iterdir()), [])
 
     def test_ldn_without_terminal_and_explicit_commands(self):
         output = self.run_cli(["--agent", "codex"], entry="bin/ldn")

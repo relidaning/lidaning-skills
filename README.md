@@ -26,8 +26,8 @@ file — the standard [Agent Skills](https://agentskills.io) format.
 # Set up the user-local command
 ./install.sh
 
-# Interactive checkbox UI — toggle skills on/off (requires gum)
-# Press x or Tab to toggle, Enter to apply, Esc to cancel.
+# Guided setup (requires gum)
+# Choose scope, agents, skills, and MCP registrations.
 ldn
 
 # Plain list with install status
@@ -75,7 +75,15 @@ Changes in this checkout are immediately available through the links. Existing
 Markdown-only installs are migrated on reinstall; directories containing local
 files are preserved and reported as conflicts.
 
-The default target remains Claude Code. Use `--agent codex` (or `--codex`),
+In a terminal, bare `ldn` asks for the scope, the agent (or group of agents),
+which skills to keep or install, and whether to keep, register, or deregister
+MCP servers. Press x or Tab to toggle checkbox items, Enter to continue, and Esc
+to cancel before changes are applied. Skills installed for every selected agent
+start checked. Uncheck one to remove it from those agents. MCP selections are
+independent of skill selections. Scope and agent flags skip their respective
+prompts. Without a terminal or gum, `ldn` shows the skill list.
+
+For explicit commands, the default target remains Claude Code. Use `--agent codex` (or `--codex`),
 `--agent both` for Claude Code + Codex, or `--agent all` for all three targets.
 `install.sh` and the Node CLI also accept `LDN_AGENT`; `ldn` uses its explicit
 agent flag. Project installs are relative to the directory you run the command
